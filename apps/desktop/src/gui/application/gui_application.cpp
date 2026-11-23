@@ -50,6 +50,7 @@
 #include "features/gallery/preview_resolution.h"
 #include "features/input/pointer_motion.h"
 #include "features/input/stream_keyboard_focus.h"
+#include "features/settings/tls_certificate_bootstrap.h"
 #include "filesystem_utf8.h"
 #include "localization.h"
 #include "platform.h"
@@ -114,6 +115,20 @@ namespace crossdesk {
 namespace {
 
 using namespace std::chrono_literals;
+
+// Administrator password guarding the self-hosted endpoint: reading it in the
+// editor, and switching it on or off all require this value.
+constexpr const char* kSelfHostedAdminPassword = "11223344";
+
+// Every path into the endpoint editor goes through the password prompt, so a
+// failed save that reopens the dialog asks again instead of exposing the host.
+void RequestSelfHostEditor(
+    const slint::ComponentHandle<ui::MainWindow>& window) {
+  window->set_self_host_password_action(slint::SharedString("edit"));
+  window->set_self_host_password_input(slint::SharedString());
+  window->set_self_host_password_error(slint::SharedString());
+  window->set_self_host_password_open(true);
+}
 
 bool SupportsControlHandCursor([[maybe_unused]] const slint::Window& window) {
 #if defined(_WIN32)
@@ -1274,6 +1289,9 @@ int GuiApplication::Run() {
 
   LOG_INFO("CrossDesk version: {} (Slint UI)", CROSSDESK_VERSION);
 
+  // Seed the session value before the settings UI reads it, so the pre-enabled
+  // endpoint shows as switched on the first time settings are opened.
+  enable_self_hosted_ = config_center_->IsSelfHosted();
   strncpy(signal_server_ip_self_, config_center_->GetSignalServerHost().c_str(),
           sizeof(signal_server_ip_self_) - 1);
   const int signal_port = config_center_->GetSignalServerPort();
@@ -1759,6 +1777,8 @@ void GuiApplication::ResetSettingsUi(bool gallery_window) {
 
 void GuiApplication::BindMainCallbacks(bool gallery_window) {
   auto* main = ui_->Window(gallery_window).operator->();
+  main->on_install_tls_certificate([this] { InstallServerCertificate(); });
+  main->on_dismiss_tls_certificate([this] { DismissTlsCertificatePrompt(); });
   main->on_gallery_pointer([this](slint::PointerEventButton button,
                                  slint::PointerEventKind kind, float x,
                                  float y) {
@@ -2110,6 +2130,9 @@ void GuiApplication::BindMainCallbacks(bool gallery_window) {
   main->on_save_self_hosted_settings([this, main] {
     // Stage the endpoint until the surrounding settings dialog is confirmed.
     return ValidateSelfHostedSettingsFromUi(main->get_gallery_mode());
+  });
+  main->on_verify_self_host_password([](slint::SharedString password) {
+    return std::string(password) == kSelfHostedAdminPassword;
   });
   main->on_cancel_self_hosted_settings([this, main] {
     main->set_self_host_settings_error("");
@@ -3537,6 +3560,7 @@ void GuiApplication::SyncMainWindow() {
     main->set_release_date(UiText(release_date_));
     main->set_settings_session_active(HasActiveSession());
   }
+  SyncTlsCertificatePrompt();
   if (show_offline_warning_window_) {
     ui_->main->set_offline_warning(UiText(offline_warning_text_));
     show_offline_warning_window_ = false;
@@ -3679,6 +3703,208 @@ void GuiApplication::SyncMainWindow() {
       model.begin(), model.end(),
       [](const ui::RecentConnection& connection) { return connection.online; });
   ui_->recent_model->set_vector(std::move(model));
+}
+
+namespace {
+
+// The localization catalog uses positional {0}/{1} tokens so a single
+// translated pattern can carry runtime values such as the endpoint and the
+// exported certificate path.
+std::string FillPlaceholders(const std::string &pattern,
+                             const std::vector<std::string> &values) {
+  std::string result = pattern;
+  for (size_t index = 0; index < values.size(); ++index) {
+    const std::string token = "{" + std::to_string(index) + "}";
+    const auto position = result.find(token);
+    if (position != std::string::npos)
+      result.replace(position, token.size(), values[index]);
+  }
+  return result;
+}
+
+}  // namespace
+
+std::string GuiApplication::TlsEndpointLabel() const {
+  if (!config_center_) return {};
+  std::string host = config_center_->GetSignalServerHost();
+  int port = config_center_->GetSignalServerPort();
+  if (host.empty()) {
+    host = config_center_->GetDefaultServerHost();
+    if (port <= 0) port = config_center_->GetDefaultSignalServerPort();
+  }
+  if (host.empty()) return {};
+  return port > 0 ? host + ":" + std::to_string(port) : host;
+}
+
+std::string GuiApplication::TlsCertificateExportDir() const {
+#if _WIN32
+  wchar_t local_app_data[MAX_PATH] = {};
+  if (GetEnvironmentVariableW(L"LOCALAPPDATA", local_app_data, MAX_PATH) > 0) {
+    return (std::filesystem::path(local_app_data) / "CrossDesk" / "certs")
+        .string();
+  }
+#endif
+  return {};
+}
+
+void GuiApplication::JoinTlsCertificateInstall() {
+  if (tls_install_thread_.joinable()) tls_install_thread_.join();
+}
+
+void GuiApplication::SyncTlsCertificatePrompt() {
+  if (!ui_) return;
+  auto *main = ui_->main.operator->();
+  const bool tls_error =
+      signal_status_ == MiniRtcSignalStatus::MiniRtcSignalTlsCertError;
+  const std::string endpoint = TlsEndpointLabel();
+
+  // A different server means a different certificate: forget any dismissal or
+  // earlier success so the new endpoint gets its own prompt.
+  if (endpoint != tls_prompt_endpoint_) {
+    tls_prompt_endpoint_ = endpoint;
+    tls_prompt_seen_ = false;
+    tls_prompt_dismissed_ = false;
+    tls_prompt_installed_ = false;
+    tls_prompt_open_ = false;
+    tls_prompt_busy_ = false;
+  }
+
+  if (tls_error) {
+    if (!tls_prompt_seen_) {
+      tls_prompt_seen_ = true;
+      if (!tls_prompt_dismissed_ && !tls_prompt_installed_ && !tls_prompt_busy_)
+        OpenTlsCertificatePrompt();
+    }
+  } else {
+    // A verified connection closes the prompt; the next failure is a new edge.
+    tls_prompt_seen_ = false;
+    if (tls_prompt_open_) {
+      tls_prompt_open_ = false;
+      tls_prompt_busy_ = false;
+    }
+  }
+
+  main->set_tls_cert_prompt_open(tls_prompt_open_);
+  main->set_tls_cert_busy(tls_prompt_busy_);
+  main->set_tls_cert_message(UiText(tls_prompt_message_));
+}
+
+void GuiApplication::OpenTlsCertificatePrompt() {
+  if (!ui_) return;
+  const int language =
+      localization::detail::ClampLanguageIndex(localization_language_index_);
+  const std::string endpoint = TlsEndpointLabel();
+  tls_prompt_message_ = FillPlaceholders(
+      localization::tls_cert_prompt_body[language], {endpoint});
+  tls_prompt_open_ = true;
+  tls_prompt_busy_ = false;
+  LOG_INFO("Server certificate for {} is not trusted; offering installation",
+           endpoint);
+}
+
+void GuiApplication::DismissTlsCertificatePrompt() {
+  tls_prompt_dismissed_ = true;
+  tls_prompt_open_ = false;
+  tls_prompt_busy_ = false;
+  if (ui_) {
+    ui_->main->set_tls_cert_prompt_open(false);
+    ui_->main->set_tls_cert_busy(false);
+  }
+}
+
+void GuiApplication::InstallServerCertificate() {
+  if (!ui_ || tls_prompt_busy_) return;
+  const int language =
+      localization::detail::ClampLanguageIndex(localization_language_index_);
+
+  std::string host;
+  int port = 0;
+  if (config_center_) {
+    host = config_center_->GetSignalServerHost();
+    port = config_center_->GetSignalServerPort();
+    if (host.empty()) {
+      host = config_center_->GetDefaultServerHost();
+      if (port <= 0) port = config_center_->GetDefaultSignalServerPort();
+    }
+  }
+  if (host.empty() || port <= 0) {
+    tls_prompt_message_ =
+        localization::tls_cert_prompt_not_self_signed[language];
+    ui_->main->set_tls_cert_message(UiText(tls_prompt_message_));
+    return;
+  }
+
+  // A previous attempt may still be finishing; reclaim it before starting a
+  // new one so the thread object is never assigned while joinable.
+  JoinTlsCertificateInstall();
+
+  tls_prompt_busy_ = true;
+  tls_prompt_message_ = localization::tls_cert_prompt_installing[language];
+  ui_->main->set_tls_cert_busy(true);
+  ui_->main->set_tls_cert_message(UiText(tls_prompt_message_));
+
+  const std::string endpoint = host + ":" + std::to_string(port);
+  const std::string export_dir = TlsCertificateExportDir();
+  tls_install_thread_ = std::thread([this, host, port, endpoint, export_dir] {
+    auto probe = ProbeServerCertificates(host, static_cast<uint16_t>(port));
+    bool installed = false;
+    std::string failure;
+    std::string exported_path;
+    if (!probe.connected) {
+      failure = probe.error;
+      LOG_WARN("Certificate probe for {} failed: {} ({})", endpoint,
+               probe.error, probe.detail);
+    } else {
+      // Only a self-signed root can become a trust anchor; a public CA chain
+      // means the problem is elsewhere (system clock, wrong host name).
+      const PresentedCertificate *root = nullptr;
+      for (const auto &certificate : probe.chain) {
+        if (certificate.self_signed) root = &certificate;
+      }
+      if (!root) {
+        failure = "not_self_signed";
+        LOG_WARN("Server {} presented no self-signed root certificate",
+                 endpoint);
+      } else {
+        auto result = InstallCertificateForCurrentUser(root->der, export_dir);
+        installed = result.ok;
+        failure = result.error;
+        exported_path = result.exported_path;
+        LOG_INFO("Certificate for {} ({}) {}; saved to {}", endpoint,
+                 root->sha256_fingerprint, installed ? "installed" : "rejected",
+                 exported_path);
+      }
+    }
+
+    slint::invoke_from_event_loop(
+        [this, installed, failure, exported_path] {
+          if (exit_ || !ui_) return;
+          const int language = localization::detail::ClampLanguageIndex(
+              localization_language_index_);
+          tls_prompt_busy_ = false;
+          if (installed) {
+            tls_prompt_installed_ = true;
+            tls_prompt_message_ =
+                localization::tls_cert_prompt_installed[language];
+          } else if (failure == "not_self_signed") {
+            tls_prompt_message_ =
+                localization::tls_cert_prompt_not_self_signed[language];
+          } else {
+            const std::string reason =
+                failure.empty() ? "unknown" : failure;
+            tls_prompt_message_ = FillPlaceholders(
+                localization::tls_cert_prompt_failed[language],
+                {reason, exported_path});
+          }
+          ui_->main->set_tls_cert_busy(false);
+          ui_->main->set_tls_cert_message(UiText(tls_prompt_message_));
+          if (installed) {
+            // Rebuild the signaling client so it picks up the new trust anchor
+            // immediately instead of waiting for the next retry tick.
+            ApplySettingsFromConfig(true);
+          }
+        });
+  });
 }
 
 void GuiApplication::SyncConnectionDialog() {
@@ -4989,7 +5215,7 @@ bool GuiApplication::SaveSettingsFromUi(bool gallery_window) {
       !std::string(main->get_server_port()).empty();
   if (has_endpoint && !ValidateSelfHostedSettingsFromUi(gallery_window)) {
     main->set_settings_tab(0);
-    main->set_self_host_settings_open(true);
+    RequestSelfHostEditor(main);
     return false;
   }
   const auto wall_settings = gallery::StreamSettings::FromIndices(
@@ -5017,7 +5243,7 @@ bool GuiApplication::SaveSettingsFromUi(bool gallery_window) {
     main->set_self_host_settings_error(UiText(
         localization::self_hosted_save_failed[localization_language_index_]));
     main->set_settings_tab(0);
-    main->set_self_host_settings_open(true);
+    RequestSelfHostEditor(main);
     return false;
   }
   if (config_center_->SetIpDirectEnabled(main->get_ip_direct_enabled_draft()) != 0) {
@@ -7028,6 +7254,9 @@ void GuiApplication::SyncGallery() {
 }
 
 void GuiApplication::Cleanup() {
+  // The certificate installer owns a worker thread that may still be blocked on
+  // the network; reclaim it before the event loop and ui_ go away.
+  JoinTlsCertificateInstall();
   // Deactivate queued presentation work before sessions/renderers are released.
   // This covers every platform: the wakeup may be invoked from a decoder thread
   // that outlives the window.

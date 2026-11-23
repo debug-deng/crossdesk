@@ -13,6 +13,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <unordered_map>
 
 #include <remote_action.h>
@@ -73,6 +74,17 @@ private:
   void HandlePasswordChangeResult();
   void HandleCredentialRecovery();
   void SyncMainWindow();
+  // Self-hosted servers present a self-signed root, so the first handshake with
+  // a fresh deployment always fails verification. Surface that as a dialog that
+  // can install the root into the current user's trust store instead of a
+  // silent retry loop.
+  void SyncTlsCertificatePrompt();
+  void OpenTlsCertificatePrompt();
+  void InstallServerCertificate();
+  void DismissTlsCertificatePrompt();
+  std::string TlsEndpointLabel() const;
+  std::string TlsCertificateExportDir() const;
+  void JoinTlsCertificateInstall();
   void ShowGalleryWindow();
   void CloseGalleryWindow();
   void SyncWindowGeometry(bool gallery_window);
@@ -161,6 +173,18 @@ private:
   std::chrono::steady_clock::time_point last_video_frame_gap_log_time_{};
   std::atomic<bool> video_present_queued_{false};
   SignalConnectionIndicator signal_connection_indicator_;
+  // Untrusted server certificate prompt. The worker thread only touches the
+  // atomic/mutex guarded fields; every Slint property is written on the UI
+  // thread.
+  bool tls_prompt_open_ = false;
+  bool tls_prompt_busy_ = false;
+  bool tls_prompt_seen_ = false;
+  bool tls_prompt_dismissed_ = false;
+  bool tls_prompt_installed_ = false;
+  std::string tls_prompt_endpoint_;
+  std::string tls_prompt_message_;
+  std::thread tls_install_thread_;
+  std::atomic<bool> tls_install_running_{false};
 #if (defined(__linux__) && !defined(__OHOS__)) && !defined(__APPLE__)
   bool use_xwayland_gui_ = false;
   bool use_x11_custom_titlebar_ = false;

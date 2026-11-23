@@ -8028,6 +8028,90 @@
       "es": "Certificado del servidor no válido o caducado. Reintentando automáticamente.",
       "pt-BR": "Certificado do servidor inválido ou expirado. Tentando novamente automaticamente."
     },
+    "服务器证书不受信任": {
+      "zh-Hans": "服务器证书不受信任",
+      "en": "Server certificate is not trusted",
+      "ru": "Сертификат сервера не является доверенным",
+      "zh-Hant": "伺服器憑證不受信任",
+      "ja": "サーバー証明書が信頼されていません",
+      "ko": "서버 인증서를 신뢰할 수 없습니다",
+      "de": "Serverzertifikat ist nicht vertrauenswürdig",
+      "fr": "Le certificat du serveur n'est pas approuvé",
+      "es": "El certificado del servidor no es de confianza",
+      "pt-BR": "O certificado do servidor não é confiável"
+    },
+    "无法验证服务器 {0} 的证书，因为它链到一张自签名的根证书。点击“自动安装证书”可把该根证书加入当前用户的受信任根证书库，不需要管理员权限。": {
+      "zh-Hans": "无法验证服务器 {0} 的证书，因为它链到一张自签名的根证书。点击“自动安装证书”可把该根证书加入当前用户的受信任根证书库，不需要管理员权限。",
+      "en": "The certificate presented by {0} cannot be verified because it chains to a self-signed root. Choose “Install certificate” to add that root to the current user's trusted root store. Administrator rights are not required.",
+      "ru": "Не удаётся проверить сертификат сервера {0}: цепочка ведёт к самоподписанному корню. Нажмите «Установить сертификат», чтобы добавить этот корень в хранилище доверенных корневых сертификатов текущего пользователя. Права администратора не нужны.",
+      "zh-Hant": "無法驗證伺服器 {0} 的憑證，因為它鏈結到一張自簽章的根憑證。點選「自動安裝憑證」可將該根憑證加入目前使用者的受信任根憑證存放區，不需要系統管理員權限。",
+      "ja": "サーバー {0} の証明書は自己署名ルートにつながるため検証できません。「証明書をインストール」を選ぶと、そのルートが現在のユーザーの信頼されたルート証明書ストアに追加されます。管理者権限は不要です。",
+      "ko": "서버 {0}의 인증서는 자체 서명된 루트로 연결되어 검증할 수 없습니다. “인증서 설치”를 선택하면 해당 루트가 현재 사용자의 신뢰할 수 있는 루트 저장소에 추가됩니다. 관리자 권한은 필요하지 않습니다.",
+      "de": "Das Zertifikat von {0} kann nicht überprüft werden, da es auf eine selbstsignierte Stammstelle zurückgeht. Mit „Zertifikat installieren“ wird diese Stammstelle in den Stammspeicher des aktuellen Benutzers aufgenommen. Administratorrechte sind nicht erforderlich.",
+      "fr": "Le certificat présenté par {0} ne peut pas être vérifié : il remonte à une racine auto-signée. Choisissez « Installer le certificat » pour ajouter cette racine au magasin de racines approuvées de l'utilisateur courant. Aucun droit administrateur n'est requis.",
+      "es": "No se puede verificar el certificado de {0} porque depende de una raíz autofirmada. Elige «Instalar certificado» para añadir esa raíz al almacén de entidades de confianza del usuario actual. No se requieren permisos de administrador.",
+      "pt-BR": "O certificado de {0} não pode ser verificado porque depende de uma raiz autoassinada. Escolha “Instalar certificado” para adicionar essa raiz ao repositório de raízes confiáveis do usuário atual. Não são necessários privilégios de administrador."
+    },
+    "自动安装证书": {
+      "zh-Hans": "自动安装证书",
+      "en": "Install certificate",
+      "ru": "Установить сертификат",
+      "zh-Hant": "自動安裝憑證",
+      "ja": "証明書をインストール",
+      "ko": "인증서 설치",
+      "de": "Zertifikat installieren",
+      "fr": "Installer le certificat",
+      "es": "Instalar certificado",
+      "pt-BR": "Instalar certificado"
+    },
+    "正在读取服务器证书并写入信任库…": {
+      "zh-Hans": "正在安装…",
+      "en": "Installing…",
+      "ru": "Установка…",
+      "zh-Hant": "正在安裝…",
+      "ja": "インストール中…",
+      "ko": "설치 중…",
+      "de": "Wird installiert…",
+      "fr": "Installation…",
+      "es": "Instalando…",
+      "pt-BR": "Instalando…"
+    },
+    "证书已安装，正在重新连接服务器…": {
+      "zh-Hans": "证书已安装，正在重新连接服务器…",
+      "en": "Certificate installed. Reconnecting to the server…",
+      "ru": "Сертификат установлен. Переподключение к серверу…",
+      "zh-Hant": "憑證已安裝，正在重新連線伺服器…",
+      "ja": "証明書をインストールしました。サーバーに再接続しています…",
+      "ko": "인증서가 설치되었습니다. 서버에 다시 연결하는 중…",
+      "de": "Zertifikat installiert. Verbindung zum Server wird wiederhergestellt…",
+      "fr": "Certificat installé. Reconnexion au serveur…",
+      "es": "Certificado instalado. Reconectando con el servidor…",
+      "pt-BR": "Certificado instalado. Reconectando ao servidor…"
+    },
+    "自动安装未成功（{0}）。证书已保存到 {1}，可双击该文件后选择“安装证书”，位置选“当前用户” → “受信任的根证书颁发机构”。": {
+      "zh-Hans": "自动安装未成功（{0}）。证书已保存到 {1}，可双击该文件后选择“安装证书”，位置选“当前用户” → “受信任的根证书颁发机构”。",
+      "en": "Automatic installation failed ({0}). The certificate was saved to {1}; double-click it and choose “Install Certificate”, then place it in “Current User” → “Trusted Root Certification Authorities”.",
+      "ru": "Автоматическая установка не удалась ({0}). Сертификат сохранён в {1}: откройте его двойным щелчком, выберите «Установить сертификат» и укажите «Текущий пользователь» → «Доверенные корневые центры сертификации».",
+      "zh-Hant": "自動安裝未成功（{0}）。憑證已儲存到 {1}，可雙擊該檔案後選擇「安裝憑證」，位置選「目前使用者」 → 「受信任的根憑證授權單位」。",
+      "ja": "自動インストールに失敗しました（{0}）。証明書は {1} に保存されています。ファイルをダブルクリックして「証明書のインストール」を選び、「現在のユーザー」→「信頼されたルート証明機関」に配置してください。",
+      "ko": "자동 설치에 실패했습니다({0}). 인증서가 {1}에 저장되었습니다. 파일을 두 번 클릭해 “인증서 설치”를 선택하고 “현재 사용자” → “신뢰할 수 있는 루트 인증 기관”에 배치하십시오.",
+      "de": "Die automatische Installation ist fehlgeschlagen ({0}). Das Zertifikat wurde unter {1} gespeichert. Doppelklicken Sie darauf, wählen Sie „Zertifikat installieren“ und legen Sie es unter „Aktueller Benutzer“ → „Vertrauenswürdige Stammzertifizierungsstellen“ ab.",
+      "fr": "L'installation automatique a échoué ({0}). Le certificat a été enregistré dans {1} ; double-cliquez dessus, choisissez « Installer le certificat », puis placez-le dans « Utilisateur actuel » → « Autorités de certification racines de confiance ».",
+      "es": "La instalación automática ha fallado ({0}). El certificado se ha guardado en {1}; haz doble clic en él, elige «Instalar certificado» y colócalo en «Usuario actual» → «Entidades de certificación raíz de confianza».",
+      "pt-BR": "A instalação automática falhou ({0}). O certificado foi salvo em {1}; clique duas vezes nele, escolha “Instalar certificado” e coloque-o em “Usuário atual” → “Autoridades de certificação raiz confiáveis”."
+    },
+    "服务器下发的证书链里没有自签名根证书。请先检查系统时间是否正确；若服务器使用受信任机构签发的证书，请联系服务器管理员。": {
+      "zh-Hans": "服务器下发的证书链里没有自签名根证书。请先检查系统时间是否正确；若服务器使用受信任机构签发的证书，请联系服务器管理员。",
+      "en": "The server did not present a self-signed root certificate. Check that the system clock is correct; if the server uses a certificate from a public authority, contact its administrator.",
+      "ru": "Сервер не предоставил самоподписанный корневой сертификат. Проверьте системное время; если сервер использует сертификат публичного центра, обратитесь к администратору.",
+      "zh-Hant": "伺服器下發的憑證鏈中沒有自簽章根憑證。請先檢查系統時間是否正確；若伺服器使用受信任機構簽發的憑證，請聯絡伺服器管理員。",
+      "ja": "サーバーから送られた証明書チェーンに自己署名ルート証明書が含まれていません。システム時刻が正しいか確認してください。公的機関の証明書を使っている場合はサーバー管理者に連絡してください。",
+      "ko": "서버가 제공한 인증서 체인에 자체 서명된 루트 인증서가 없습니다. 시스템 시간이 올바른지 확인하십시오. 공인 기관의 인증서를 사용하는 경우 서버 관리자에게 문의하십시오.",
+      "de": "Der Server hat kein selbstsigniertes Stammzertifikat übermittelt. Prüfen Sie die Systemzeit. Verwendet der Server ein Zertifikat einer öffentlichen Stelle, wenden Sie sich an dessen Administrator.",
+      "fr": "Le serveur n'a pas présenté de certificat racine auto-signé. Vérifiez l'horloge système ; si le serveur utilise un certificat délivré par une autorité publique, contactez son administrateur.",
+      "es": "El servidor no presentó un certificado raíz autofirmado. Comprueba que la hora del sistema sea correcta; si el servidor usa un certificado de una autoridad pública, contacta con su administrador.",
+      "pt-BR": "O servidor não apresentou um certificado raiz autoassinado. Verifique se o relógio do sistema está correto; se o servidor usar um certificado de uma autoridade pública, contate o administrador."
+    },
     "该分组暂无近期连接": {
       "zh-Hans": "该分组暂无近期连接",
       "en": "No recent connections in this group",
@@ -11867,6 +11951,42 @@
       "fr": "Adresse distante",
       "es": "Dirección remota",
       "pt-BR": "Endereço remoto"
+    },
+    "需要密码验证": {
+      "zh-Hans": "需要密码验证",
+      "en": "Password required",
+      "ru": "Требуется пароль",
+      "zh-Hant": "需要密碼驗證",
+      "ja": "パスワードが必要です",
+      "ko": "비밀번호가 필요합니다",
+      "de": "Passwort erforderlich",
+      "fr": "Mot de passe requis",
+      "es": "Se requiere contraseña",
+      "pt-BR": "Senha necessária"
+    },
+    "编辑或开关自托管服务器需要输入管理密码。": {
+      "zh-Hans": "编辑或开关自托管服务器需要输入管理密码。",
+      "en": "Enter the administrator password to edit or toggle the self-hosted server.",
+      "ru": "Введите пароль администратора, чтобы изменить или включить/отключить собственный сервер.",
+      "zh-Hant": "編輯或開關自託管伺服器需要輸入管理密碼。",
+      "ja": "セルフホストサーバーの編集・オン/オフには管理者パスワードが必要です。",
+      "ko": "자체 호스팅 서버를 편집하거나 켜고 끄려면 관리자 비밀번호를 입력하세요.",
+      "de": "Geben Sie das Administratorkennwort ein, um den selbst gehosteten Server zu bearbeiten oder umzuschalten.",
+      "fr": "Saisissez le mot de passe administrateur pour modifier ou activer/désactiver le serveur auto-hébergé.",
+      "es": "Introduzca la contraseña de administrador para editar o activar/desactivar el servidor autoalojado.",
+      "pt-BR": "Digite a senha de administrador para editar ou ativar/desativar o servidor auto-hospedado."
+    },
+    "密码错误，请重试。": {
+      "zh-Hans": "密码错误，请重试。",
+      "en": "Incorrect password. Try again.",
+      "ru": "Неверный пароль. Повторите попытку.",
+      "zh-Hant": "密碼錯誤，請重試。",
+      "ja": "パスワードが違います。もう一度お試しください。",
+      "ko": "비밀번호가 올바르지 않습니다. 다시 시도하세요.",
+      "de": "Falsches Passwort. Bitte erneut versuchen.",
+      "fr": "Mot de passe incorrect. Réessayez.",
+      "es": "Contraseña incorrecta. Inténtalo de nuevo.",
+      "pt-BR": "Senha incorreta. Tente novamente."
     }
   },
   "desktop": {
@@ -12049,6 +12169,13 @@
     "signal_reconnect": "重新连接",
     "signal_reconnecting": "正在重新连接...",
     "signal_tls_cert_error": "服务器证书无效或已过期，正在自动重试",
+    "tls_cert_prompt_title": "服务器证书不受信任",
+    "tls_cert_prompt_body": "无法验证服务器 {0} 的证书，因为它链到一张自签名的根证书。点击“自动安装证书”可把该根证书加入当前用户的受信任根证书库，不需要管理员权限。",
+    "tls_cert_prompt_install": "自动安装证书",
+    "tls_cert_prompt_installing": "正在读取服务器证书并写入信任库…",
+    "tls_cert_prompt_installed": "证书已安装，正在重新连接服务器…",
+    "tls_cert_prompt_failed": "自动安装未成功（{0}）。证书已保存到 {1}，可双击该文件后选择“安装证书”，位置选“当前用户” → “受信任的根证书颁发机构”。",
+    "tls_cert_prompt_not_self_signed": "服务器下发的证书链里没有自签名根证书。请先检查系统时间是否正确；若服务器使用受信任机构签发的证书，请联系服务器管理员。",
     "p2p_connected": "对等连接已建立",
     "p2p_disconnected": "对等连接已断开",
     "p2p_connecting": "正在建立对等连接...",
@@ -12165,7 +12292,10 @@
     "windows_service_repairing": "正在修复 Windows 服务…",
     "windows_service_repair_success": "服务已修复并启动",
     "windows_service_repair_failed": "修复失败，请检查管理员权限和便携版文件后重试",
-    "remote_service_unavailable_message": "远端 Windows 服务不可用，锁屏时无法操作。请在远端安装或修复 CrossDesk 服务。"
+    "remote_service_unavailable_message": "远端 Windows 服务不可用，锁屏时无法操作。请在远端安装或修复 CrossDesk 服务。",
+    "self_host_password_title": "需要密码验证",
+    "self_host_password_hint": "编辑或开关自托管服务器需要输入管理密码。",
+    "self_host_password_wrong": "密码错误，请重试。"
   },
   "slint": [
     "此端口已被占用，",
@@ -12762,6 +12892,13 @@
       "访问官网: ",
       "访问密码必须为 6 位英文字母或数字，区分大小写。",
       "服务器证书无效或已过期，正在自动重试",
+      "服务器证书不受信任",
+      "无法验证服务器 {0} 的证书，因为它链到一张自签名的根证书。点击“自动安装证书”可把该根证书加入当前用户的受信任根证书库，不需要管理员权限。",
+      "自动安装证书",
+      "正在读取服务器证书并写入信任库…",
+      "证书已安装，正在重新连接服务器…",
+      "自动安装未成功（{0}）。证书已保存到 {1}，可双击该文件后选择“安装证书”，位置选“当前用户” → “受信任的根证书颁发机构”。",
+      "服务器下发的证书链里没有自签名根证书。请先检查系统时间是否正确；若服务器使用受信任机构签发的证书，请联系服务器管理员。",
       "该分组暂无近期连接",
       "该应用需要授权以下权限:",
       "该设备正在连接，请稍候",
@@ -12939,7 +13076,10 @@
       "请检查 FUSE 安装和挂载权限。",
       "可使用文件传输窗口发送文件。",
       "本端地址",
-      "对端地址"
+      "对端地址",
+      "需要密码验证",
+      "编辑或开关自托管服务器需要输入管理密码。",
+      "密码错误，请重试。"
     ],
     "android": [
       " · 已完成",

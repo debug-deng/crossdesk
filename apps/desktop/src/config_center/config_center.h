@@ -39,6 +39,12 @@ class ConfigCenter {
   explicit ConfigCenter(const std::string& config_path = "config.ini");
   ~ConfigCenter();
 
+  // Self-hosted signaling endpoint baked into this build. It is written into
+  // the configuration once and shipped enabled; switching it off is a user
+  // decision that later loads must not undo.
+  static constexpr const char* kSelfHostedPresetHost = "8.138.12.16";
+  static constexpr int kSelfHostedPresetPort = 9099;
+
   struct StreamWindowSize {
     int width;
     int height;
@@ -132,11 +138,11 @@ class ConfigCenter {
   int relay_start_bitrate_bps_ = kDefaultRelayStartBitrateBps;
   static constexpr bool kDefaultDisableReceiverPaddingProbing = true;
   bool disable_receiver_padding_probing_ = kDefaultDisableReceiverPaddingProbing;
-  std::string signal_server_host_ = "";
+  std::string signal_server_host_ = kSelfHostedPresetHost;
   std::string signal_server_host_default_ = "api.crossdesk.cn";
-  int signal_server_port_ = 0;
+  int signal_server_port_ = kSelfHostedPresetPort;
   int server_port_default_ = 9099;
-  bool enable_self_hosted_ = false;
+  bool enable_self_hosted_ = true;
   bool enable_autostart_ = false;
   bool enable_daemon_ = false;
   std::atomic<bool> enable_privacy_screen_{true};

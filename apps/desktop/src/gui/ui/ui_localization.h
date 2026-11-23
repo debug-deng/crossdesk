@@ -169,6 +169,15 @@ inline int ApplyMainWindowStrings(
   strings.set_signal_disconnected(
       Text(localization::signal_disconnected[language]));
   strings.set_tls_error(Text(localization::signal_tls_cert_error[language]));
+  strings.set_tls_cert_title(Text(localization::tls_cert_prompt_title[language]));
+  strings.set_tls_cert_install(Text(localization::tls_cert_prompt_install[language]));
+  strings.set_tls_cert_installing(Text(localization::tls_cert_prompt_installing[language]));
+  strings.set_self_host_password_title(
+      Text(localization::self_host_password_title[language]));
+  strings.set_self_host_password_hint(
+      Text(localization::self_host_password_hint[language]));
+  strings.set_self_host_password_wrong(
+      Text(localization::self_host_password_wrong[language]));
   strings.set_signal_reconnect(
       Text(localization::signal_reconnect[language]));
   strings.set_signal_reconnecting(

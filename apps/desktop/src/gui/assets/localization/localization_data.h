@@ -389,6 +389,13 @@ inline constexpr TranslationRow kTranslationRows[] = {
   {"访问官网: ", {"访问官网: ", "Access Website: ", "Официальный сайт: ", "訪問官網: ", "ウェブサイトにアクセス: ", "웹사이트 접속: ", "Zugriff auf die Website: ", "Accéder au site Web : ", "Acceder al sitio web: ", "Acesse o site: "}},
   {"访问密码必须为 6 位英文字母或数字，区分大小写。", {"访问密码必须为 6 位英文字母或数字，区分大小写。", "Use exactly 6 letters (A–Z, a–z) or digits (0–9). Case-sensitive.", "Пароль: ровно 6 латинских букв или цифр. Регистр учитывается.", "訪問密碼必須為 6 位英文字母或數字，區分大小寫。", "正確に 6 つの文字 (A ～ Z、a ～ z) または数字 (0 ～ 9) を使用してください。大文字と小文字を区別。", "정확히 6개의 문자(A–Z, a–z) 또는 숫자(0–9)를 사용하세요. 대소문자를 구분합니다.", "Verwenden Sie genau 6 Buchstaben (A–Z, a–z) oder Ziffern (0–9). Groß- und Kleinschreibung beachten.", "Utilisez exactement 6 lettres (A–Z, a–z) ou chiffres (0–9). Sensible aux majuscules et minuscules.", "Utilice exactamente 6 letras (A–Z, a–z) o dígitos (0–9). Distingue mayúsculas y minúsculas.", "Use exatamente 6 letras (A–Z, a–z) ou dígitos (0–9). Maiúsculas e minúsculas."}},
   {"服务器证书无效或已过期，正在自动重试", {"服务器证书无效或已过期，正在自动重试", "Server certificate invalid or expired. Retrying automatically.", "Сертификат сервера недействителен или просрочен. Повторяем подключение автоматически.", "伺服器憑證無效或已過期，正在自動重試", "サーバー証明書が無効か期限切れです。自動的に再試行します。", "서버 인증서가 유효하지 않거나 만료되었습니다. 자동으로 재시도합니다.", "Serverzertifikat ungültig oder abgelaufen. Automatischer Neuversuch.", "Certificat du serveur invalide ou expiré. Nouvelle tentative automatique.", "Certificado del servidor no válido o caducado. Reintentando automáticamente.", "Certificado do servidor inválido ou expirado. Tentando novamente automaticamente."}},
+  {"服务器证书不受信任", {"服务器证书不受信任", "Server certificate is not trusted", "Сертификат сервера не является доверенным", "伺服器憑證不受信任", "サーバー証明書が信頼されていません", "서버 인증서를 신뢰할 수 없습니다", "Serverzertifikat ist nicht vertrauenswürdig", "Le certificat du serveur n'est pas approuvé", "El certificado del servidor no es de confianza", "O certificado do servidor não é confiável"}},
+  {"无法验证服务器 {0} 的证书，因为它链到一张自签名的根证书。点击“自动安装证书”可把该根证书加入当前用户的受信任根证书库，不需要管理员权限。", {"无法验证服务器 {0} 的证书，因为它链到一张自签名的根证书。点击“自动安装证书”可把该根证书加入当前用户的受信任根证书库，不需要管理员权限。", "The certificate presented by {0} cannot be verified because it chains to a self-signed root. Choose “Install certificate” to add that root to the current user's trusted root store. Administrator rights are not required.", "Не удаётся проверить сертификат сервера {0}: цепочка ведёт к самоподписанному корню. Нажмите «Установить сертификат», чтобы добавить этот корень в хранилище доверенных корневых сертификатов текущего пользователя. Права администратора не нужны.", "無法驗證伺服器 {0} 的憑證，因為它鏈結到一張自簽章的根憑證。點選「自動安裝憑證」可將該根憑證加入目前使用者的受信任根憑證存放區，不需要系統管理員權限。", "サーバー {0} の証明書は自己署名ルートにつながるため検証できません。「証明書をインストール」を選ぶと、そのルートが現在のユーザーの信頼されたルート証明書ストアに追加されます。管理者権限は不要です。", "서버 {0}의 인증서는 자체 서명된 루트로 연결되어 검증할 수 없습니다. “인증서 설치”를 선택하면 해당 루트가 현재 사용자의 신뢰할 수 있는 루트 저장소에 추가됩니다. 관리자 권한은 필요하지 않습니다.", "Das Zertifikat von {0} kann nicht überprüft werden, da es auf eine selbstsignierte Stammstelle zurückgeht. Mit „Zertifikat installieren“ wird diese Stammstelle in den Stammspeicher des aktuellen Benutzers aufgenommen. Administratorrechte sind nicht erforderlich.", "Le certificat présenté par {0} ne peut pas être vérifié : il remonte à une racine auto-signée. Choisissez « Installer le certificat » pour ajouter cette racine au magasin de racines approuvées de l'utilisateur courant. Aucun droit administrateur n'est requis.", "No se puede verificar el certificado de {0} porque depende de una raíz autofirmada. Elige «Instalar certificado» para añadir esa raíz al almacén de entidades de confianza del usuario actual. No se requieren permisos de administrador.", "O certificado de {0} não pode ser verificado porque depende de uma raiz autoassinada. Escolha “Instalar certificado” para adicionar essa raiz ao repositório de raízes confiáveis do usuário atual. Não são necessários privilégios de administrador."}},
+  {"自动安装证书", {"自动安装证书", "Install certificate", "Установить сертификат", "自動安裝憑證", "証明書をインストール", "인증서 설치", "Zertifikat installieren", "Installer le certificat", "Instalar certificado", "Instalar certificado"}},
+  {"正在读取服务器证书并写入信任库…", {"正在安装…", "Installing…", "Установка…", "正在安裝…", "インストール中…", "설치 중…", "Wird installiert…", "Installation…", "Instalando…", "Instalando…"}},
+  {"证书已安装，正在重新连接服务器…", {"证书已安装，正在重新连接服务器…", "Certificate installed. Reconnecting to the server…", "Сертификат установлен. Переподключение к серверу…", "憑證已安裝，正在重新連線伺服器…", "証明書をインストールしました。サーバーに再接続しています…", "인증서가 설치되었습니다. 서버에 다시 연결하는 중…", "Zertifikat installiert. Verbindung zum Server wird wiederhergestellt…", "Certificat installé. Reconnexion au serveur…", "Certificado instalado. Reconectando con el servidor…", "Certificado instalado. Reconectando ao servidor…"}},
+  {"自动安装未成功（{0}）。证书已保存到 {1}，可双击该文件后选择“安装证书”，位置选“当前用户” → “受信任的根证书颁发机构”。", {"自动安装未成功（{0}）。证书已保存到 {1}，可双击该文件后选择“安装证书”，位置选“当前用户” → “受信任的根证书颁发机构”。", "Automatic installation failed ({0}). The certificate was saved to {1}; double-click it and choose “Install Certificate”, then place it in “Current User” → “Trusted Root Certification Authorities”.", "Автоматическая установка не удалась ({0}). Сертификат сохранён в {1}: откройте его двойным щелчком, выберите «Установить сертификат» и укажите «Текущий пользователь» → «Доверенные корневые центры сертификации».", "自動安裝未成功（{0}）。憑證已儲存到 {1}，可雙擊該檔案後選擇「安裝憑證」，位置選「目前使用者」 → 「受信任的根憑證授權單位」。", "自動インストールに失敗しました（{0}）。証明書は {1} に保存されています。ファイルをダブルクリックして「証明書のインストール」を選び、「現在のユーザー」→「信頼されたルート証明機関」に配置してください。", "자동 설치에 실패했습니다({0}). 인증서가 {1}에 저장되었습니다. 파일을 두 번 클릭해 “인증서 설치”를 선택하고 “현재 사용자” → “신뢰할 수 있는 루트 인증 기관”에 배치하십시오.", "Die automatische Installation ist fehlgeschlagen ({0}). Das Zertifikat wurde unter {1} gespeichert. Doppelklicken Sie darauf, wählen Sie „Zertifikat installieren“ und legen Sie es unter „Aktueller Benutzer“ → „Vertrauenswürdige Stammzertifizierungsstellen“ ab.", "L'installation automatique a échoué ({0}). Le certificat a été enregistré dans {1} ; double-cliquez dessus, choisissez « Installer le certificat », puis placez-le dans « Utilisateur actuel » → « Autorités de certification racines de confiance ».", "La instalación automática ha fallado ({0}). El certificado se ha guardado en {1}; haz doble clic en él, elige «Instalar certificado» y colócalo en «Usuario actual» → «Entidades de certificación raíz de confianza».", "A instalação automática falhou ({0}). O certificado foi salvo em {1}; clique duas vezes nele, escolha “Instalar certificado” e coloque-o em “Usuário atual” → “Autoridades de certificação raiz confiáveis”."}},
+  {"服务器下发的证书链里没有自签名根证书。请先检查系统时间是否正确；若服务器使用受信任机构签发的证书，请联系服务器管理员。", {"服务器下发的证书链里没有自签名根证书。请先检查系统时间是否正确；若服务器使用受信任机构签发的证书，请联系服务器管理员。", "The server did not present a self-signed root certificate. Check that the system clock is correct; if the server uses a certificate from a public authority, contact its administrator.", "Сервер не предоставил самоподписанный корневой сертификат. Проверьте системное время; если сервер использует сертификат публичного центра, обратитесь к администратору.", "伺服器下發的憑證鏈中沒有自簽章根憑證。請先檢查系統時間是否正確；若伺服器使用受信任機構簽發的憑證，請聯絡伺服器管理員。", "サーバーから送られた証明書チェーンに自己署名ルート証明書が含まれていません。システム時刻が正しいか確認してください。公的機関の証明書を使っている場合はサーバー管理者に連絡してください。", "서버가 제공한 인증서 체인에 자체 서명된 루트 인증서가 없습니다. 시스템 시간이 올바른지 확인하십시오. 공인 기관의 인증서를 사용하는 경우 서버 관리자에게 문의하십시오.", "Der Server hat kein selbstsigniertes Stammzertifikat übermittelt. Prüfen Sie die Systemzeit. Verwendet der Server ein Zertifikat einer öffentlichen Stelle, wenden Sie sich an dessen Administrator.", "Le serveur n'a pas présenté de certificat racine auto-signé. Vérifiez l'horloge système ; si le serveur utilise un certificat délivré par une autorité publique, contactez son administrateur.", "El servidor no presentó un certificado raíz autofirmado. Comprueba que la hora del sistema sea correcta; si el servidor usa un certificado de una autoridad pública, contacta con su administrador.", "O servidor não apresentou um certificado raiz autoassinado. Verifique se o relógio do sistema está correto; se o servidor usar um certificado de uma autoridade pública, contate o administrador."}},
   {"该分组暂无近期连接", {"该分组暂无近期连接", "No recent connections in this group", "В этой группе нет недавних подключений", "該分組暫無近期連線", "このグループには最近の接続がありません", "이 그룹에는 최근 연결이 없습니다.", "Keine aktuellen Verbindungen in dieser Gruppe", "Aucune connexion récente dans ce groupe", "No hay conexiones recientes en este grupo.", "Nenhuma conexão recente neste grupo"}},
   {"该应用需要授权以下权限:", {"该应用需要授权以下权限:", "The application requires the following permissions:", "Для работы приложения требуются следующие разрешения:", "該應用需要授權以下許可權:", "アプリケーションには次の権限が必要です。", "애플리케이션에는 다음 권한이 필요합니다.", "Die Anwendung erfordert die folgenden Berechtigungen:", "L'application nécessite les autorisations suivantes :", "La aplicación requiere los siguientes permisos:", "O aplicativo requer as seguintes permissões:"}},
   {"该设备正在连接，请稍候", {"该设备正在连接，请稍候", "This device is already connecting", "Устройство уже подключается", "該裝置正在連線，請稍候", "このデバイスはすでに接続されています", "이 장치는 이미 연결되어 있습니다", "Dieses Gerät stellt bereits eine Verbindung her", "Cet appareil est déjà connecté", "Este dispositivo ya se está conectando", "Este dispositivo já está conectado"}},
@@ -567,6 +574,9 @@ inline constexpr TranslationRow kTranslationRows[] = {
   {"可使用文件传输窗口发送文件。", {"可使用文件传输窗口发送文件。", "You can send files using the file transfer window.", "Файлы можно отправить через окно передачи файлов.", "可使用檔案傳輸視窗傳送檔案。", "ファイル転送ウィンドウから送信できます。", "파일 전송 창에서 파일을 보낼 수 있습니다.", "Senden Sie Dateien über das Dateiübertragungsfenster.", "Vous pouvez envoyer les fichiers via la fenêtre de transfert.", "Puedes enviar archivos desde la ventana de transferencia.", "Você pode enviar arquivos pela janela de transferência."}},
   {"本端地址", {"本端地址", "Local endpoint", "Локальный адрес", "本端位址", "ローカルアドレス", "로컬 주소", "Lokale Adresse", "Adresse locale", "Dirección local", "Endereço local"}},
   {"对端地址", {"对端地址", "Remote endpoint", "Удалённый адрес", "對端位址", "リモートアドレス", "원격 주소", "Remote-Adresse", "Adresse distante", "Dirección remota", "Endereço remoto"}},
+  {"需要密码验证", {"需要密码验证", "Password required", "Требуется пароль", "需要密碼驗證", "パスワードが必要です", "비밀번호가 필요합니다", "Passwort erforderlich", "Mot de passe requis", "Se requiere contraseña", "Senha necessária"}},
+  {"编辑或开关自托管服务器需要输入管理密码。", {"编辑或开关自托管服务器需要输入管理密码。", "Enter the administrator password to edit or toggle the self-hosted server.", "Введите пароль администратора, чтобы изменить или включить/отключить собственный сервер.", "編輯或開關自託管伺服器需要輸入管理密碼。", "セルフホストサーバーの編集・オン/オフには管理者パスワードが必要です。", "자체 호스팅 서버를 편집하거나 켜고 끄려면 관리자 비밀번호를 입력하세요.", "Geben Sie das Administratorkennwort ein, um den selbst gehosteten Server zu bearbeiten oder umzuschalten.", "Saisissez le mot de passe administrateur pour modifier ou activer/désactiver le serveur auto-hébergé.", "Introduzca la contraseña de administrador para editar o activar/desactivar el servidor autoalojado.", "Digite a senha de administrador para editar ou ativar/desativar o servidor auto-hospedado."}},
+  {"密码错误，请重试。", {"密码错误，请重试。", "Incorrect password. Try again.", "Неверный пароль. Повторите попытку.", "密碼錯誤，請重試。", "パスワードが違います。もう一度お試しください。", "비밀번호가 올바르지 않습니다. 다시 시도하세요.", "Falsches Passwort. Bitte erneut versuchen.", "Mot de passe incorrect. Réessayez.", "Contraseña incorrecta. Inténtalo de nuevo.", "Senha incorreta. Tente novamente."}},
 };
 
 struct NamedTranslation { const char* name; const char* literal; };
@@ -750,6 +760,13 @@ inline constexpr NamedTranslation kNamedTranslations[] = {
   {"signal_reconnect", "重新连接"},
   {"signal_reconnecting", "正在重新连接..."},
   {"signal_tls_cert_error", "服务器证书无效或已过期，正在自动重试"},
+  {"tls_cert_prompt_title", "服务器证书不受信任"},
+  {"tls_cert_prompt_body", "无法验证服务器 {0} 的证书，因为它链到一张自签名的根证书。点击“自动安装证书”可把该根证书加入当前用户的受信任根证书库，不需要管理员权限。"},
+  {"tls_cert_prompt_install", "自动安装证书"},
+  {"tls_cert_prompt_installing", "正在读取服务器证书并写入信任库…"},
+  {"tls_cert_prompt_installed", "证书已安装，正在重新连接服务器…"},
+  {"tls_cert_prompt_failed", "自动安装未成功（{0}）。证书已保存到 {1}，可双击该文件后选择“安装证书”，位置选“当前用户” → “受信任的根证书颁发机构”。"},
+  {"tls_cert_prompt_not_self_signed", "服务器下发的证书链里没有自签名根证书。请先检查系统时间是否正确；若服务器使用受信任机构签发的证书，请联系服务器管理员。"},
   {"p2p_connected", "对等连接已建立"},
   {"p2p_disconnected", "对等连接已断开"},
   {"p2p_connecting", "正在建立对等连接..."},
@@ -867,6 +884,9 @@ inline constexpr NamedTranslation kNamedTranslations[] = {
   {"windows_service_repair_success", "服务已修复并启动"},
   {"windows_service_repair_failed", "修复失败，请检查管理员权限和便携版文件后重试"},
   {"remote_service_unavailable_message", "远端 Windows 服务不可用，锁屏时无法操作。请在远端安装或修复 CrossDesk 服务。"},
+  {"self_host_password_title", "需要密码验证"},
+  {"self_host_password_hint", "编辑或开关自托管服务器需要输入管理密码。"},
+  {"self_host_password_wrong", "密码错误，请重试。"},
 };
 inline constexpr const char* kSlintLiterals[] = {
   "此端口已被占用，",
@@ -1267,6 +1287,13 @@ inline constexpr const char* kSlintLiterals[] = {
   X(signal_reconnect) \
   X(signal_reconnecting) \
   X(signal_tls_cert_error) \
+  X(tls_cert_prompt_title) \
+  X(tls_cert_prompt_body) \
+  X(tls_cert_prompt_install) \
+  X(tls_cert_prompt_installing) \
+  X(tls_cert_prompt_installed) \
+  X(tls_cert_prompt_failed) \
+  X(tls_cert_prompt_not_self_signed) \
   X(p2p_connected) \
   X(p2p_disconnected) \
   X(p2p_connecting) \
@@ -1383,7 +1410,10 @@ inline constexpr const char* kSlintLiterals[] = {
   X(windows_service_repairing) \
   X(windows_service_repair_success) \
   X(windows_service_repair_failed) \
-  X(remote_service_unavailable_message)
+  X(remote_service_unavailable_message) \
+  X(self_host_password_title) \
+  X(self_host_password_hint) \
+  X(self_host_password_wrong)
 
 }  // namespace localization
 }  // namespace crossdesk

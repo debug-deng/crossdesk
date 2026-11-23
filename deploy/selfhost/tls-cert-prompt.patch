@@ -1,0 +1,1033 @@
+diff --git a/apps/desktop/src/gui/application/gui_application.cpp b/apps/desktop/src/gui/application/gui_application.cpp
+index 8f7b9a53..72451194 100644
+--- a/apps/desktop/src/gui/application/gui_application.cpp
++++ b/apps/desktop/src/gui/application/gui_application.cpp
+@@ -50,6 +50,7 @@
+ #include "features/gallery/preview_resolution.h"
+ #include "features/input/pointer_motion.h"
+ #include "features/input/stream_keyboard_focus.h"
++#include "features/settings/tls_certificate_bootstrap.h"
+ #include "filesystem_utf8.h"
+ #include "localization.h"
+ #include "platform.h"
+@@ -1759,6 +1760,8 @@ void GuiApplication::ResetSettingsUi(bool gallery_window) {
+ 
+ void GuiApplication::BindMainCallbacks(bool gallery_window) {
+   auto* main = ui_->Window(gallery_window).operator->();
++  main->on_install_tls_certificate([this] { InstallServerCertificate(); });
++  main->on_dismiss_tls_certificate([this] { DismissTlsCertificatePrompt(); });
+   main->on_gallery_pointer([this](slint::PointerEventButton button,
+                                  slint::PointerEventKind kind, float x,
+                                  float y) {
+@@ -3533,6 +3536,7 @@ void GuiApplication::SyncMainWindow() {
+     main->set_release_date(UiText(release_date_));
+     main->set_settings_session_active(HasActiveSession());
+   }
++  SyncTlsCertificatePrompt();
+   if (show_offline_warning_window_) {
+     ui_->main->set_offline_warning(UiText(offline_warning_text_));
+     show_offline_warning_window_ = false;
+@@ -3677,6 +3681,208 @@ void GuiApplication::SyncMainWindow() {
+   ui_->recent_model->set_vector(std::move(model));
+ }
+ 
++namespace {
++
++// The localization catalog uses positional {0}/{1} tokens so a single
++// translated pattern can carry runtime values such as the endpoint and the
++// exported certificate path.
++std::string FillPlaceholders(const std::string &pattern,
++                             const std::vector<std::string> &values) {
++  std::string result = pattern;
++  for (size_t index = 0; index < values.size(); ++index) {
++    const std::string token = "{" + std::to_string(index) + "}";
++    const auto position = result.find(token);
++    if (position != std::string::npos)
++      result.replace(position, token.size(), values[index]);
++  }
++  return result;
++}
++
++}  // namespace
++
++std::string GuiApplication::TlsEndpointLabel() const {
++  if (!config_center_) return {};
++  std::string host = config_center_->GetSignalServerHost();
++  int port = config_center_->GetSignalServerPort();
++  if (host.empty()) {
++    host = config_center_->GetDefaultServerHost();
++    if (port <= 0) port = config_center_->GetDefaultSignalServerPort();
++  }
++  if (host.empty()) return {};
++  return port > 0 ? host + ":" + std::to_string(port) : host;
++}
++
++std::string GuiApplication::TlsCertificateExportDir() const {
++#if _WIN32
++  wchar_t local_app_data[MAX_PATH] = {};
++  if (GetEnvironmentVariableW(L"LOCALAPPDATA", local_app_data, MAX_PATH) > 0) {
++    return (std::filesystem::path(local_app_data) / "CrossDesk" / "certs")
++        .string();
++  }
++#endif
++  return {};
++}
++
++void GuiApplication::JoinTlsCertificateInstall() {
++  if (tls_install_thread_.joinable()) tls_install_thread_.join();
++}
++
++void GuiApplication::SyncTlsCertificatePrompt() {
++  if (!ui_) return;
++  auto *main = ui_->main.operator->();
++  const bool tls_error =
++      signal_status_ == MiniRtcSignalStatus::MiniRtcSignalTlsCertError;
++  const std::string endpoint = TlsEndpointLabel();
++
++  // A different server means a different certificate: forget any dismissal or
++  // earlier success so the new endpoint gets its own prompt.
++  if (endpoint != tls_prompt_endpoint_) {
++    tls_prompt_endpoint_ = endpoint;
++    tls_prompt_seen_ = false;
++    tls_prompt_dismissed_ = false;
++    tls_prompt_installed_ = false;
++    tls_prompt_open_ = false;
++    tls_prompt_busy_ = false;
++  }
++
++  if (tls_error) {
++    if (!tls_prompt_seen_) {
++      tls_prompt_seen_ = true;
++      if (!tls_prompt_dismissed_ && !tls_prompt_installed_ && !tls_prompt_busy_)
++        OpenTlsCertificatePrompt();
++    }
++  } else {
++    // A verified connection closes the prompt; the next failure is a new edge.
++    tls_prompt_seen_ = false;
++    if (tls_prompt_open_) {
++      tls_prompt_open_ = false;
++      tls_prompt_busy_ = false;
++    }
++  }
++
++  main->set_tls_cert_prompt_open(tls_prompt_open_);
++  main->set_tls_cert_busy(tls_prompt_busy_);
++  main->set_tls_cert_message(UiText(tls_prompt_message_));
++}
++
++void GuiApplication::OpenTlsCertificatePrompt() {
++  if (!ui_) return;
++  const int language =
++      localization::detail::ClampLanguageIndex(localization_language_index_);
++  const std::string endpoint = TlsEndpointLabel();
++  tls_prompt_message_ = FillPlaceholders(
++      localization::tls_cert_prompt_body[language], {endpoint});
++  tls_prompt_open_ = true;
++  tls_prompt_busy_ = false;
++  LOG_INFO("Server certificate for {} is not trusted; offering installation",
++           endpoint);
++}
++
++void GuiApplication::DismissTlsCertificatePrompt() {
++  tls_prompt_dismissed_ = true;
++  tls_prompt_open_ = false;
++  tls_prompt_busy_ = false;
++  if (ui_) {
++    ui_->main->set_tls_cert_prompt_open(false);
++    ui_->main->set_tls_cert_busy(false);
++  }
++}
++
++void GuiApplication::InstallServerCertificate() {
++  if (!ui_ || tls_prompt_busy_) return;
++  const int language =
++      localization::detail::ClampLanguageIndex(localization_language_index_);
++
++  std::string host;
++  int port = 0;
++  if (config_center_) {
++    host = config_center_->GetSignalServerHost();
++    port = config_center_->GetSignalServerPort();
++    if (host.empty()) {
++      host = config_center_->GetDefaultServerHost();
++      if (port <= 0) port = config_center_->GetDefaultSignalServerPort();
++    }
++  }
++  if (host.empty() || port <= 0) {
++    tls_prompt_message_ =
++        localization::tls_cert_prompt_not_self_signed[language];
++    ui_->main->set_tls_cert_message(UiText(tls_prompt_message_));
++    return;
++  }
++
++  // A previous attempt may still be finishing; reclaim it before starting a
++  // new one so the thread object is never assigned while joinable.
++  JoinTlsCertificateInstall();
++
++  tls_prompt_busy_ = true;
++  tls_prompt_message_ = localization::tls_cert_prompt_installing[language];
++  ui_->main->set_tls_cert_busy(true);
++  ui_->main->set_tls_cert_message(UiText(tls_prompt_message_));
++
++  const std::string endpoint = host + ":" + std::to_string(port);
++  const std::string export_dir = TlsCertificateExportDir();
++  tls_install_thread_ = std::thread([this, host, port, endpoint, export_dir] {
++    auto probe = ProbeServerCertificates(host, static_cast<uint16_t>(port));
++    bool installed = false;
++    std::string failure;
++    std::string exported_path;
++    if (!probe.connected) {
++      failure = probe.error;
++      LOG_WARN("Certificate probe for {} failed: {} ({})", endpoint,
++               probe.error, probe.detail);
++    } else {
++      // Only a self-signed root can become a trust anchor; a public CA chain
++      // means the problem is elsewhere (system clock, wrong host name).
++      const PresentedCertificate *root = nullptr;
++      for (const auto &certificate : probe.chain) {
++        if (certificate.self_signed) root = &certificate;
++      }
++      if (!root) {
++        failure = "not_self_signed";
++        LOG_WARN("Server {} presented no self-signed root certificate",
++                 endpoint);
++      } else {
++        auto result = InstallCertificateForCurrentUser(root->der, export_dir);
++        installed = result.ok;
++        failure = result.error;
++        exported_path = result.exported_path;
++        LOG_INFO("Certificate for {} ({}) {}; saved to {}", endpoint,
++                 root->sha256_fingerprint, installed ? "installed" : "rejected",
++                 exported_path);
++      }
++    }
++
++    slint::invoke_from_event_loop(
++        [this, installed, failure, exported_path] {
++          if (exit_ || !ui_) return;
++          const int language = localization::detail::ClampLanguageIndex(
++              localization_language_index_);
++          tls_prompt_busy_ = false;
++          if (installed) {
++            tls_prompt_installed_ = true;
++            tls_prompt_message_ =
++                localization::tls_cert_prompt_installed[language];
++          } else if (failure == "not_self_signed") {
++            tls_prompt_message_ =
++                localization::tls_cert_prompt_not_self_signed[language];
++          } else {
++            const std::string reason =
++                failure.empty() ? "unknown" : failure;
++            tls_prompt_message_ = FillPlaceholders(
++                localization::tls_cert_prompt_failed[language],
++                {reason, exported_path});
++          }
++          ui_->main->set_tls_cert_busy(false);
++          ui_->main->set_tls_cert_message(UiText(tls_prompt_message_));
++          if (installed) {
++            // Rebuild the signaling client so it picks up the new trust anchor
++            // immediately instead of waiting for the next retry tick.
++            ApplySettingsFromConfig(true);
++          }
++        });
++  });
++}
++
+ void GuiApplication::SyncConnectionDialog() {
+   const bool gallery_dialog = !ui_->gallery_auth_id.empty();
+   const auto props = show_connection_status_window_
+@@ -7020,6 +7226,9 @@ void GuiApplication::SyncGallery() {
+ }
+ 
+ void GuiApplication::Cleanup() {
++  // The certificate installer owns a worker thread that may still be blocked on
++  // the network; reclaim it before the event loop and ui_ go away.
++  JoinTlsCertificateInstall();
+   // Deactivate queued presentation work before sessions/renderers are released.
+   // This covers every platform: the wakeup may be invoked from a decoder thread
+   // that outlives the window.
+diff --git a/apps/desktop/src/gui/application/gui_application.h b/apps/desktop/src/gui/application/gui_application.h
+index f02dc64b..1a112232 100644
+--- a/apps/desktop/src/gui/application/gui_application.h
++++ b/apps/desktop/src/gui/application/gui_application.h
+@@ -13,6 +13,7 @@
+ #include <memory>
+ #include <optional>
+ #include <string>
++#include <thread>
+ #include <unordered_map>
+ 
+ #include <remote_action.h>
+@@ -73,6 +74,17 @@ private:
+   void HandlePasswordChangeResult();
+   void HandleCredentialRecovery();
+   void SyncMainWindow();
++  // Self-hosted servers present a self-signed root, so the first handshake with
++  // a fresh deployment always fails verification. Surface that as a dialog that
++  // can install the root into the current user's trust store instead of a
++  // silent retry loop.
++  void SyncTlsCertificatePrompt();
++  void OpenTlsCertificatePrompt();
++  void InstallServerCertificate();
++  void DismissTlsCertificatePrompt();
++  std::string TlsEndpointLabel() const;
++  std::string TlsCertificateExportDir() const;
++  void JoinTlsCertificateInstall();
+   void ShowGalleryWindow();
+   void CloseGalleryWindow();
+   void SyncWindowGeometry(bool gallery_window);
+@@ -161,6 +173,18 @@ private:
+   std::chrono::steady_clock::time_point last_video_frame_gap_log_time_{};
+   std::atomic<bool> video_present_queued_{false};
+   SignalConnectionIndicator signal_connection_indicator_;
++  // Untrusted server certificate prompt. The worker thread only touches the
++  // atomic/mutex guarded fields; every Slint property is written on the UI
++  // thread.
++  bool tls_prompt_open_ = false;
++  bool tls_prompt_busy_ = false;
++  bool tls_prompt_seen_ = false;
++  bool tls_prompt_dismissed_ = false;
++  bool tls_prompt_installed_ = false;
++  std::string tls_prompt_endpoint_;
++  std::string tls_prompt_message_;
++  std::thread tls_install_thread_;
++  std::atomic<bool> tls_install_running_{false};
+ #if (defined(__linux__) && !defined(__OHOS__)) && !defined(__APPLE__)
+   bool use_xwayland_gui_ = false;
+   bool use_x11_custom_titlebar_ = false;
+diff --git a/apps/desktop/src/gui/assets/localization/localization_data.h b/apps/desktop/src/gui/assets/localization/localization_data.h
+index 58352443..acec3c5c 100644
+--- a/apps/desktop/src/gui/assets/localization/localization_data.h
++++ b/apps/desktop/src/gui/assets/localization/localization_data.h
+@@ -389,6 +389,13 @@ inline constexpr TranslationRow kTranslationRows[] = {
+   {"访问官网: ", {"访问官网: ", "Access Website: ", "Официальный сайт: ", "訪問官網: ", "ウェブサイトにアクセス: ", "웹사이트 접속: ", "Zugriff auf die Website: ", "Accéder au site Web : ", "Acceder al sitio web: ", "Acesse o site: "}},
+   {"访问密码必须为 6 位英文字母或数字，区分大小写。", {"访问密码必须为 6 位英文字母或数字，区分大小写。", "Use exactly 6 letters (A–Z, a–z) or digits (0–9). Case-sensitive.", "Пароль: ровно 6 латинских букв или цифр. Регистр учитывается.", "訪問密碼必須為 6 位英文字母或數字，區分大小寫。", "正確に 6 つの文字 (A ～ Z、a ～ z) または数字 (0 ～ 9) を使用してください。大文字と小文字を区別。", "정확히 6개의 문자(A–Z, a–z) 또는 숫자(0–9)를 사용하세요. 대소문자를 구분합니다.", "Verwenden Sie genau 6 Buchstaben (A–Z, a–z) oder Ziffern (0–9). Groß- und Kleinschreibung beachten.", "Utilisez exactement 6 lettres (A–Z, a–z) ou chiffres (0–9). Sensible aux majuscules et minuscules.", "Utilice exactamente 6 letras (A–Z, a–z) o dígitos (0–9). Distingue mayúsculas y minúsculas.", "Use exatamente 6 letras (A–Z, a–z) ou dígitos (0–9). Maiúsculas e minúsculas."}},
+   {"服务器证书无效或已过期，正在自动重试", {"服务器证书无效或已过期，正在自动重试", "Server certificate invalid or expired. Retrying automatically.", "Сертификат сервера недействителен или просрочен. Повторяем подключение автоматически.", "伺服器憑證無效或已過期，正在自動重試", "サーバー証明書が無効か期限切れです。自動的に再試行します。", "서버 인증서가 유효하지 않거나 만료되었습니다. 자동으로 재시도합니다.", "Serverzertifikat ungültig oder abgelaufen. Automatischer Neuversuch.", "Certificat du serveur invalide ou expiré. Nouvelle tentative automatique.", "Certificado del servidor no válido o caducado. Reintentando automáticamente.", "Certificado do servidor inválido ou expirado. Tentando novamente automaticamente."}},
++  {"服务器证书不受信任", {"服务器证书不受信任", "Server certificate is not trusted", "Сертификат сервера не является доверенным", "伺服器憑證不受信任", "サーバー証明書が信頼されていません", "서버 인증서를 신뢰할 수 없습니다", "Serverzertifikat ist nicht vertrauenswürdig", "Le certificat du serveur n'est pas approuvé", "El certificado del servidor no es de confianza", "O certificado do servidor não é confiável"}},
++  {"无法验证服务器 {0} 的证书，因为它链到一张自签名的根证书。点击“自动安装证书”可把该根证书加入当前用户的受信任根证书库，不需要管理员权限。", {"无法验证服务器 {0} 的证书，因为它链到一张自签名的根证书。点击“自动安装证书”可把该根证书加入当前用户的受信任根证书库，不需要管理员权限。", "The certificate presented by {0} cannot be verified because it chains to a self-signed root. Choose “Install certificate” to add that root to the current user's trusted root store. Administrator rights are not required.", "Не удаётся проверить сертификат сервера {0}: цепочка ведёт к самоподписанному корню. Нажмите «Установить сертификат», чтобы добавить этот корень в хранилище доверенных корневых сертификатов текущего пользователя. Права администратора не нужны.", "無法驗證伺服器 {0} 的憑證，因為它鏈結到一張自簽章的根憑證。點選「自動安裝憑證」可將該根憑證加入目前使用者的受信任根憑證存放區，不需要系統管理員權限。", "サーバー {0} の証明書は自己署名ルートにつながるため検証できません。「証明書をインストール」を選ぶと、そのルートが現在のユーザーの信頼されたルート証明書ストアに追加されます。管理者権限は不要です。", "서버 {0}의 인증서는 자체 서명된 루트로 연결되어 검증할 수 없습니다. “인증서 설치”를 선택하면 해당 루트가 현재 사용자의 신뢰할 수 있는 루트 저장소에 추가됩니다. 관리자 권한은 필요하지 않습니다.", "Das Zertifikat von {0} kann nicht überprüft werden, da es auf eine selbstsignierte Stammstelle zurückgeht. Mit „Zertifikat installieren“ wird diese Stammstelle in den Stammspeicher des aktuellen Benutzers aufgenommen. Administratorrechte sind nicht erforderlich.", "Le certificat présenté par {0} ne peut pas être vérifié : il remonte à une racine auto-signée. Choisissez « Installer le certificat » pour ajouter cette racine au magasin de racines approuvées de l'utilisateur courant. Aucun droit administrateur n'est requis.", "No se puede verificar el certificado de {0} porque depende de una raíz autofirmada. Elige «Instalar certificado» para añadir esa raíz al almacén de entidades de confianza del usuario actual. No se requieren permisos de administrador.", "O certificado de {0} não pode ser verificado porque depende de uma raiz autoassinada. Escolha “Instalar certificado” para adicionar essa raiz ao repositório de raízes confiáveis do usuário atual. Não são necessários privilégios de administrador."}},
++  {"自动安装证书", {"自动安装证书", "Install certificate", "Установить сертификат", "自動安裝憑證", "証明書をインストール", "인증서 설치", "Zertifikat installieren", "Installer le certificat", "Instalar certificado", "Instalar certificado"}},
++  {"正在读取服务器证书并写入信任库…", {"正在安装…", "Installing…", "Установка…", "正在安裝…", "インストール中…", "설치 중…", "Wird installiert…", "Installation…", "Instalando…", "Instalando…"}},
++  {"证书已安装，正在重新连接服务器…", {"证书已安装，正在重新连接服务器…", "Certificate installed. Reconnecting to the server…", "Сертификат установлен. Переподключение к серверу…", "憑證已安裝，正在重新連線伺服器…", "証明書をインストールしました。サーバーに再接続しています…", "인증서가 설치되었습니다. 서버에 다시 연결하는 중…", "Zertifikat installiert. Verbindung zum Server wird wiederhergestellt…", "Certificat installé. Reconnexion au serveur…", "Certificado instalado. Reconectando con el servidor…", "Certificado instalado. Reconectando ao servidor…"}},
++  {"自动安装未成功（{0}）。证书已保存到 {1}，可双击该文件后选择“安装证书”，位置选“当前用户” → “受信任的根证书颁发机构”。", {"自动安装未成功（{0}）。证书已保存到 {1}，可双击该文件后选择“安装证书”，位置选“当前用户” → “受信任的根证书颁发机构”。", "Automatic installation failed ({0}). The certificate was saved to {1}; double-click it and choose “Install Certificate”, then place it in “Current User” → “Trusted Root Certification Authorities”.", "Автоматическая установка не удалась ({0}). Сертификат сохранён в {1}: откройте его двойным щелчком, выберите «Установить сертификат» и укажите «Текущий пользователь» → «Доверенные корневые центры сертификации».", "自動安裝未成功（{0}）。憑證已儲存到 {1}，可雙擊該檔案後選擇「安裝憑證」，位置選「目前使用者」 → 「受信任的根憑證授權單位」。", "自動インストールに失敗しました（{0}）。証明書は {1} に保存されています。ファイルをダブルクリックして「証明書のインストール」を選び、「現在のユーザー」→「信頼されたルート証明機関」に配置してください。", "자동 설치에 실패했습니다({0}). 인증서가 {1}에 저장되었습니다. 파일을 두 번 클릭해 “인증서 설치”를 선택하고 “현재 사용자” → “신뢰할 수 있는 루트 인증 기관”에 배치하십시오.", "Die automatische Installation ist fehlgeschlagen ({0}). Das Zertifikat wurde unter {1} gespeichert. Doppelklicken Sie darauf, wählen Sie „Zertifikat installieren“ und legen Sie es unter „Aktueller Benutzer“ → „Vertrauenswürdige Stammzertifizierungsstellen“ ab.", "L'installation automatique a échoué ({0}). Le certificat a été enregistré dans {1} ; double-cliquez dessus, choisissez « Installer le certificat », puis placez-le dans « Utilisateur actuel » → « Autorités de certification racines de confiance ».", "La instalación automática ha fallado ({0}). El certificado se ha guardado en {1}; haz doble clic en él, elige «Instalar certificado» y colócalo en «Usuario actual» → «Entidades de certificación raíz de confianza».", "A instalação automática falhou ({0}). O certificado foi salvo em {1}; clique duas vezes nele, escolha “Instalar certificado” e coloque-o em “Usuário atual” → “Autoridades de certificação raiz confiáveis”."}},
++  {"服务器下发的证书链里没有自签名根证书。请先检查系统时间是否正确；若服务器使用受信任机构签发的证书，请联系服务器管理员。", {"服务器下发的证书链里没有自签名根证书。请先检查系统时间是否正确；若服务器使用受信任机构签发的证书，请联系服务器管理员。", "The server did not present a self-signed root certificate. Check that the system clock is correct; if the server uses a certificate from a public authority, contact its administrator.", "Сервер не предоставил самоподписанный корневой сертификат. Проверьте системное время; если сервер использует сертификат публичного центра, обратитесь к администратору.", "伺服器下發的憑證鏈中沒有自簽章根憑證。請先檢查系統時間是否正確；若伺服器使用受信任機構簽發的憑證，請聯絡伺服器管理員。", "サーバーから送られた証明書チェーンに自己署名ルート証明書が含まれていません。システム時刻が正しいか確認してください。公的機関の証明書を使っている場合はサーバー管理者に連絡してください。", "서버가 제공한 인증서 체인에 자체 서명된 루트 인증서가 없습니다. 시스템 시간이 올바른지 확인하십시오. 공인 기관의 인증서를 사용하는 경우 서버 관리자에게 문의하십시오.", "Der Server hat kein selbstsigniertes Stammzertifikat übermittelt. Prüfen Sie die Systemzeit. Verwendet der Server ein Zertifikat einer öffentlichen Stelle, wenden Sie sich an dessen Administrator.", "Le serveur n'a pas présenté de certificat racine auto-signé. Vérifiez l'horloge système ; si le serveur utilise un certificat délivré par une autorité publique, contactez son administrateur.", "El servidor no presentó un certificado raíz autofirmado. Comprueba que la hora del sistema sea correcta; si el servidor usa un certificado de una autoridad pública, contacta con su administrador.", "O servidor não apresentou um certificado raiz autoassinado. Verifique se o relógio do sistema está correto; se o servidor usar um certificado de uma autoridade pública, contate o administrador."}},
+   {"该分组暂无近期连接", {"该分组暂无近期连接", "No recent connections in this group", "В этой группе нет недавних подключений", "該分組暫無近期連線", "このグループには最近の接続がありません", "이 그룹에는 최근 연결이 없습니다.", "Keine aktuellen Verbindungen in dieser Gruppe", "Aucune connexion récente dans ce groupe", "No hay conexiones recientes en este grupo.", "Nenhuma conexão recente neste grupo"}},
+   {"该应用需要授权以下权限:", {"该应用需要授权以下权限:", "The application requires the following permissions:", "Для работы приложения требуются следующие разрешения:", "該應用需要授權以下許可權:", "アプリケーションには次の権限が必要です。", "애플리케이션에는 다음 권한이 필요합니다.", "Die Anwendung erfordert die folgenden Berechtigungen:", "L'application nécessite les autorisations suivantes :", "La aplicación requiere los siguientes permisos:", "O aplicativo requer as seguintes permissões:"}},
+   {"该设备正在连接，请稍候", {"该设备正在连接，请稍候", "This device is already connecting", "Устройство уже подключается", "該裝置正在連線，請稍候", "このデバイスはすでに接続されています", "이 장치는 이미 연결되어 있습니다", "Dieses Gerät stellt bereits eine Verbindung her", "Cet appareil est déjà connecté", "Este dispositivo ya se está conectando", "Este dispositivo já está conectado"}},
+@@ -750,6 +757,13 @@ inline constexpr NamedTranslation kNamedTranslations[] = {
+   {"signal_reconnect", "重新连接"},
+   {"signal_reconnecting", "正在重新连接..."},
+   {"signal_tls_cert_error", "服务器证书无效或已过期，正在自动重试"},
++  {"tls_cert_prompt_title", "服务器证书不受信任"},
++  {"tls_cert_prompt_body", "无法验证服务器 {0} 的证书，因为它链到一张自签名的根证书。点击“自动安装证书”可把该根证书加入当前用户的受信任根证书库，不需要管理员权限。"},
++  {"tls_cert_prompt_install", "自动安装证书"},
++  {"tls_cert_prompt_installing", "正在读取服务器证书并写入信任库…"},
++  {"tls_cert_prompt_installed", "证书已安装，正在重新连接服务器…"},
++  {"tls_cert_prompt_failed", "自动安装未成功（{0}）。证书已保存到 {1}，可双击该文件后选择“安装证书”，位置选“当前用户” → “受信任的根证书颁发机构”。"},
++  {"tls_cert_prompt_not_self_signed", "服务器下发的证书链里没有自签名根证书。请先检查系统时间是否正确；若服务器使用受信任机构签发的证书，请联系服务器管理员。"},
+   {"p2p_connected", "对等连接已建立"},
+   {"p2p_disconnected", "对等连接已断开"},
+   {"p2p_connecting", "正在建立对等连接..."},
+@@ -1267,6 +1281,13 @@ inline constexpr const char* kSlintLiterals[] = {
+   X(signal_reconnect) \
+   X(signal_reconnecting) \
+   X(signal_tls_cert_error) \
++  X(tls_cert_prompt_title) \
++  X(tls_cert_prompt_body) \
++  X(tls_cert_prompt_install) \
++  X(tls_cert_prompt_installing) \
++  X(tls_cert_prompt_installed) \
++  X(tls_cert_prompt_failed) \
++  X(tls_cert_prompt_not_self_signed) \
+   X(p2p_connected) \
+   X(p2p_disconnected) \
+   X(p2p_connecting) \
+diff --git a/apps/desktop/src/gui/features/settings/tls_certificate_bootstrap.cpp b/apps/desktop/src/gui/features/settings/tls_certificate_bootstrap.cpp
+new file mode 100644
+index 00000000..38d66ea1
+--- /dev/null
++++ b/apps/desktop/src/gui/features/settings/tls_certificate_bootstrap.cpp
+@@ -0,0 +1,377 @@
++/*
++ * @Author: DI JUNKUN
++ * Copyright (c) 2026 by DI JUNKUN, All Rights Reserved.
++ */
++
++#include "features/settings/tls_certificate_bootstrap.h"
++
++#include <algorithm>
++#include <cstdio>
++#include <cstring>
++#include <filesystem>
++#include <fstream>
++
++#if defined(_WIN32)
++
++#ifndef WIN32_LEAN_AND_MEAN
++#define WIN32_LEAN_AND_MEAN
++#endif
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++// winsock2.h must precede windows.h.
++#include <winsock2.h>
++#include <ws2tcpip.h>
++#include <windows.h>
++#include <wincrypt.h>
++
++#include <openssl/err.h>
++#include <openssl/evp.h>
++#include <openssl/pem.h>
++#include <openssl/ssl.h>
++#include <openssl/x509.h>
++#include <openssl/x509v3.h>
++
++namespace crossdesk {
++namespace {
++
++bool EnsureWinsock() {
++  static const bool ready = [] {
++    WSADATA data{};
++    return WSAStartup(MAKEWORD(2, 2), &data) == 0;
++  }();
++  return ready;
++}
++
++std::string TakeBioString(BIO *bio) {
++  if (!bio) return {};
++  char *data = nullptr;
++  const long size = BIO_get_mem_data(bio, &data);
++  std::string text = (data && size > 0) ? std::string(data, static_cast<size_t>(size)) : std::string{};
++  BIO_free(bio);
++  return text;
++}
++
++std::string NameToString(X509_NAME *name) {
++  if (!name) return {};
++  BIO *bio = BIO_new(BIO_s_mem());
++  if (!bio) return {};
++  if (X509_NAME_print_ex(bio, name, 0, XN_FLAG_RFC2253) < 0) {
++    BIO_free(bio);
++    return {};
++  }
++  return TakeBioString(bio);
++}
++
++std::string TimeToString(const ASN1_TIME *time) {
++  if (!time) return {};
++  BIO *bio = BIO_new(BIO_s_mem());
++  if (!bio) return {};
++  if (ASN1_TIME_print(bio, time) != 1) {
++    BIO_free(bio);
++    return {};
++  }
++  return TakeBioString(bio);
++}
++
++std::string FingerprintSha256(X509 *cert) {
++  unsigned char digest[EVP_MAX_MD_SIZE];
++  unsigned int length = 0;
++  if (X509_digest(cert, EVP_sha256(), digest, &length) != 1) return {};
++  std::string text;
++  char part[4];
++  for (unsigned int i = 0; i < length; ++i) {
++    std::snprintf(part, sizeof(part), i == 0 ? "%02X" : ":%02X", digest[i]);
++    text += part;
++  }
++  return text;
++}
++
++PresentedCertificate Describe(X509 *cert) {
++  PresentedCertificate info;
++  unsigned char *der = nullptr;
++  const int length = i2d_X509(cert, &der);
++  if (length > 0 && der) {
++    info.der.assign(der, der + length);
++    OPENSSL_free(der);
++  }
++  info.subject = NameToString(X509_get_subject_name(cert));
++  info.issuer = NameToString(X509_get_issuer_name(cert));
++  info.sha256_fingerprint = FingerprintSha256(cert);
++  info.not_after = TimeToString(X509_get0_notAfter(cert));
++  // A certificate that issued itself is a self-signed root; only that one can
++  // serve as a trust anchor for a private deployment.
++  info.self_signed = X509_check_issued(cert, cert) == X509_V_OK;
++  info.is_ca = X509_check_ca(cert) > 0;
++  return info;
++}
++
++std::string SocketErrorText(int code) {
++  switch (code) {
++    case WSAETIMEDOUT: return "connect_timed_out";
++    case WSAECONNREFUSED: return "connect_refused";
++    case WSAEHOSTUNREACH:
++    case WSAENETUNREACH: return "host_unreachable";
++    default: return "connect_failed";
++  }
++}
++
++SOCKET ConnectSocket(const std::string &host, uint16_t port, int timeout_ms,
++                     std::string &error, std::string &detail) {
++  addrinfo hints{};
++  hints.ai_family = AF_UNSPEC;
++  hints.ai_socktype = SOCK_STREAM;
++  hints.ai_protocol = IPPROTO_TCP;
++
++  char service[8] = {};
++  std::snprintf(service, sizeof(service), "%u", static_cast<unsigned>(port));
++
++  addrinfo *addresses = nullptr;
++  const int resolve = getaddrinfo(host.c_str(), service, &hints, &addresses);
++  if (resolve != 0 || !addresses) {
++    error = "resolve_failed";
++    detail = gai_strerrorA(resolve);
++    if (addresses) freeaddrinfo(addresses);
++    return INVALID_SOCKET;
++  }
++
++  DWORD last_error = 0;
++  SOCKET connected = INVALID_SOCKET;
++  for (addrinfo *entry = addresses; entry; entry = entry->ai_next) {
++    SOCKET candidate = socket(entry->ai_family, entry->ai_socktype, entry->ai_protocol);
++    if (candidate == INVALID_SOCKET) {
++      last_error = static_cast<DWORD>(WSAGetLastError());
++      continue;
++    }
++
++    u_long non_blocking = 1;
++    ioctlsocket(candidate, FIONBIO, &non_blocking);
++    int rc = connect(candidate, entry->ai_addr, static_cast<int>(entry->ai_addrlen));
++    if (rc == SOCKET_ERROR) {
++      const int connect_error = WSAGetLastError();
++      if (connect_error != WSAEWOULDBLOCK) {
++        last_error = static_cast<DWORD>(connect_error);
++        closesocket(candidate);
++        continue;
++      }
++      fd_set writable;
++      fd_set failed;
++      FD_ZERO(&writable);
++      FD_ZERO(&failed);
++      FD_SET(candidate, &writable);
++      FD_SET(candidate, &failed);
++      timeval timeout{};
++      timeout.tv_sec = timeout_ms / 1000;
++      timeout.tv_usec = (timeout_ms % 1000) * 1000;
++      const int ready = select(0, nullptr, &writable, &failed, &timeout);
++      if (ready <= 0) {
++        last_error = ready == 0 ? WSAETIMEDOUT : static_cast<DWORD>(WSAGetLastError());
++        closesocket(candidate);
++        continue;
++      }
++      int so_error = 0;
++      int so_length = sizeof(so_error);
++      getsockopt(candidate, SOL_SOCKET, SO_ERROR, reinterpret_cast<char *>(&so_error), &so_length);
++      if (so_error != 0) {
++        last_error = static_cast<DWORD>(so_error);
++        closesocket(candidate);
++        continue;
++      }
++    }
++
++    u_long blocking = 0;
++    ioctlsocket(candidate, FIONBIO, &blocking);
++    const DWORD io_timeout = static_cast<DWORD>(timeout_ms);
++    setsockopt(candidate, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&io_timeout), sizeof(io_timeout));
++    setsockopt(candidate, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char *>(&io_timeout), sizeof(io_timeout));
++    connected = candidate;
++    break;
++  }
++  freeaddrinfo(addresses);
++
++  if (connected == INVALID_SOCKET) {
++    error = SocketErrorText(static_cast<int>(last_error));
++    detail = std::to_string(last_error);
++  }
++  return connected;
++}
++
++}  // namespace
++
++CertificateProbeResult ProbeServerCertificates(const std::string &host,
++                                               uint16_t port,
++                                               int timeout_ms) {
++  CertificateProbeResult result;
++  result.supported = true;
++  if (host.empty() || port == 0) {
++    result.error = "invalid_endpoint";
++    return result;
++  }
++  if (!EnsureWinsock()) {
++    result.error = "winsock_unavailable";
++    return result;
++  }
++
++  SOCKET sock = ConnectSocket(host, port, timeout_ms, result.error, result.detail);
++  if (sock == INVALID_SOCKET) return result;
++
++  SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
++  if (!ctx) {
++    closesocket(sock);
++    result.error = "ssl_context_failed";
++    return result;
++  }
++  // Verification stays off by design: the caller shows the fingerprint and
++  // asks the user before anything is trusted.
++  SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, nullptr);
++  SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
++
++  SSL *ssl = SSL_new(ctx);
++  if (!ssl) {
++    SSL_CTX_free(ctx);
++    closesocket(sock);
++    result.error = "ssl_context_failed";
++    return result;
++  }
++
++  bool handshaken = false;
++  do {
++    if (SSL_set_fd(ssl, static_cast<int>(sock)) != 1) {
++      result.error = "ssl_socket_failed";
++      break;
++    }
++    // SNI is harmless for literal IPs and required when the server is fronted
++    // by a hostname-based reverse proxy.
++    SSL_set_tlsext_host_name(ssl, host.c_str());
++    if (SSL_connect(ssl) != 1) {
++      char text[256] = {};
++      ERR_error_string_n(ERR_get_error(), text, sizeof(text));
++      result.error = "tls_handshake_failed";
++      result.detail = text;
++      break;
++    }
++    handshaken = true;
++  } while (false);
++
++  if (handshaken) {
++    result.connected = true;
++    std::vector<std::vector<uint8_t>> seen;
++    auto append = [&](X509 *cert) {
++      if (!cert) return;
++      PresentedCertificate info = Describe(cert);
++      if (info.der.empty()) return;
++      if (std::find(seen.begin(), seen.end(), info.der) != seen.end()) return;
++      seen.push_back(info.der);
++      result.chain.push_back(std::move(info));
++    };
++
++    if (X509 *leaf = SSL_get1_peer_certificate(ssl)) {
++      append(leaf);
++      X509_free(leaf);
++    }
++    if (STACK_OF(X509) * chain = SSL_get_peer_cert_chain(ssl)) {
++      for (int i = 0; i < sk_X509_num(chain); ++i) append(sk_X509_value(chain, i));
++    }
++
++    // Prefer the deepest self-signed certificate: that is the anchor the
++    // client has to trust.
++    for (const auto &entry : result.chain) {
++      if (entry.self_signed) result.found_self_signed_root = true;
++    }
++    if (!result.found_self_signed_root && !result.chain.empty()) {
++      result.detail += result.detail.empty() ? "no_self_signed_certificate" : "; no_self_signed_certificate";
++    }
++  }
++
++  SSL_shutdown(ssl);
++  SSL_free(ssl);
++  SSL_CTX_free(ctx);
++  closesocket(sock);
++  return result;
++}
++
++CertificateInstallResult InstallCertificateForCurrentUser(
++    const std::vector<uint8_t> &der, const std::string &export_dir) {
++  CertificateInstallResult result;
++  if (der.empty()) {
++    result.error = "empty_certificate";
++    return result;
++  }
++
++  // Keep a PEM copy on disk first: it is the fallback for users who prefer to
++  // inspect and install the certificate themselves.
++  const unsigned char *cursor = der.data();
++  X509 *cert = d2i_X509(nullptr, &cursor, static_cast<long>(der.size()));
++  if (!cert) {
++    result.error = "decode_failed";
++    return result;
++  }
++  if (!export_dir.empty()) {
++    std::error_code ec;
++    std::filesystem::create_directories(export_dir, ec);
++    const auto path = std::filesystem::path(export_dir) / "crossdesk_server_root.crt";
++    FILE *file = nullptr;
++    if (_wfopen_s(&file, path.wstring().c_str(), L"wb") == 0 && file) {
++      BIO *bio = BIO_new_fp(file, BIO_NOCLOSE);
++      if (bio && PEM_write_bio_X509(bio, cert) == 1) {
++        result.exported_path = path.string();
++      }
++      BIO_free(bio);
++      std::fclose(file);
++    }
++  }
++  X509_free(cert);
++  if (result.exported_path.empty()) {
++    // Rewriting the file failed but installation may still succeed; the UI
++    // simply cannot offer the manual fallback for this attempt.
++  }
++
++  HCERTSTORE store = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0,
++                                   CERT_SYSTEM_STORE_CURRENT_USER, L"ROOT");
++  if (!store) {
++    result.error = "store_open_failed";
++    return result;
++  }
++  const BOOL added = CertAddEncodedCertificateToStore(
++      store, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, der.data(),
++      static_cast<DWORD>(der.size()), CERT_STORE_ADD_REPLACE_EXISTING, nullptr);
++  CertCloseStore(store, 0);
++  if (!added) {
++    result.error = "store_add_failed";
++    return result;
++  }
++  result.ok = true;
++  return result;
++}
++
++std::string DescribeProbeFailure(const CertificateProbeResult &result) {
++  return result.error;
++}
++
++}  // namespace crossdesk
++
++#else  // !_WIN32
++
++namespace crossdesk {
++
++CertificateProbeResult ProbeServerCertificates(const std::string &, uint16_t,
++                                               int) {
++  CertificateProbeResult result;
++  result.error = "unsupported_platform";
++  return result;
++}
++
++CertificateInstallResult InstallCertificateForCurrentUser(
++    const std::vector<uint8_t> &, const std::string &) {
++  CertificateInstallResult result;
++  result.error = "unsupported_platform";
++  return result;
++}
++
++std::string DescribeProbeFailure(const CertificateProbeResult &result) {
++  return result.error;
++}
++
++}  // namespace crossdesk
++
++#endif  // _WIN32
+diff --git a/apps/desktop/src/gui/features/settings/tls_certificate_bootstrap.h b/apps/desktop/src/gui/features/settings/tls_certificate_bootstrap.h
+new file mode 100644
+index 00000000..f6260857
+--- /dev/null
++++ b/apps/desktop/src/gui/features/settings/tls_certificate_bootstrap.h
+@@ -0,0 +1,69 @@
++/*
++ * @Author: DI JUNKUN
++ * Copyright (c) 2026 by DI JUNKUN, All Rights Reserved.
++ */
++
++#ifndef _TLS_CERTIFICATE_BOOTSTRAP_H_
++#define _TLS_CERTIFICATE_BOOTSTRAP_H_
++
++#include <cstdint>
++#include <string>
++#include <vector>
++
++namespace crossdesk {
++
++// One certificate from the chain the server presented during the TLS
++// handshake. Self-signed roots are the only ones this module may install,
++// because a public CA chain never needs a manual trust step.
++struct PresentedCertificate {
++  std::vector<uint8_t> der;
++  std::string subject;
++  std::string issuer;
++  std::string sha256_fingerprint;
++  std::string not_after;
++  bool self_signed = false;
++  bool is_ca = false;
++};
++
++struct CertificateProbeResult {
++  // False on platforms without an automatic installer; the UI then only
++  // offers manual instructions.
++  bool supported = false;
++  // True once the TLS handshake completed. Certificate verification stays
++  // disabled during the probe: the whole point is to inspect an untrusted
++  // certificate before trusting it.
++  bool connected = false;
++  bool found_self_signed_root = false;
++  // Machine readable failure token ("connect_timeout", "tls_handshake_failed").
++  std::string error;
++  // Raw OpenSSL/Winsock text kept for the log file only.
++  std::string detail;
++  std::vector<PresentedCertificate> chain;
++};
++
++// Connects to the signaling endpoint with verification disabled and returns
++// every certificate the server presented. Blocking: call from a worker thread.
++CertificateProbeResult ProbeServerCertificates(const std::string &host,
++                                               uint16_t port,
++                                               int timeout_ms = 6000);
++
++struct CertificateInstallResult {
++  bool ok = false;
++  std::string error;
++  // PEM copy written next to the application data so the user can install it
++  // manually or inspect it before trusting the server.
++  std::string exported_path;
++};
++
++// Installs the certificate into the current user's "Trusted Root Certification
++// Authorities" store. This never raises a UAC prompt, and the desktop client
++// reads that store first when it builds its trust anchors.
++CertificateInstallResult InstallCertificateForCurrentUser(
++    const std::vector<uint8_t> &der, const std::string &export_dir);
++
++// Human readable reason for the last failure, already localized by the caller.
++std::string DescribeProbeFailure(const CertificateProbeResult &result);
++
++}  // namespace crossdesk
++
++#endif  // _TLS_CERTIFICATE_BOOTSTRAP_H_
+diff --git a/apps/desktop/src/gui/ui/main_window.slint b/apps/desktop/src/gui/ui/main_window.slint
+index eed72edc..8c700036 100644
+--- a/apps/desktop/src/gui/ui/main_window.slint
++++ b/apps/desktop/src/gui/ui/main_window.slint
+@@ -98,6 +98,9 @@ export global UiStrings {
+     in-out property <string> signal-connected: "Signal server connected";
+     in-out property <string> signal-disconnected: "Signal server disconnected";
+     in-out property <string> tls-error: "Server certificate invalid or expired. Retrying automatically.";
++    in-out property <string> tls-cert-title: "Server certificate is not trusted";
++    in-out property <string> tls-cert-install: "Install certificate";
++    in-out property <string> tls-cert-installing: "Installing…";
+     in-out property <string> signal-reconnect: "Reconnect";
+     in-out property <string> signal-reconnecting: "Reconnecting...";
+     in-out property <string> update-available: "A new version is available";
+@@ -667,6 +670,14 @@ export component MainWindow inherits Window {
+     in property <bool> signal-connected: false;
+     in property <bool> signal-reconnecting: false;
+     in property <bool> signal-tls-error: false;
++    // The untrusted-certificate prompt is driven from C++: it opens on the
++    // first handshake failure for an endpoint and carries the live status text
++    // while the certificate is being installed.
++    in-out property <bool> tls-cert-prompt-open: false;
++    in property <bool> tls-cert-busy: false;
++    in-out property <string> tls-cert-message: "";
++    callback install-tls-certificate;
++    callback dismiss-tls-certificate;
+     in property <[RecentConnection]> recent-connections;
+     out property <length> recent-preview-width: max(1px, (recent-scroll.width - 24px) / 3);
+     out property <length> recent-preview-height: 80px;
+@@ -2730,6 +2741,52 @@ export component MainWindow inherits Window {
+         }
+     }
+ 
++    // Untrusted server certificate modal. A self-hosted signaling server ships a
++    // self-signed root, so verification fails on every retry until that root is
++    // trusted. Offer the one-click install instead of leaving the user in a
++    // retry loop.
++    if root.tls-cert-prompt-open: Rectangle {
++        background: #00000042;
++        z: 49;
++        TouchArea { clicked => { focus-sink.focus(); } }
++        DialogSurface {
++            x: (parent.width - self.width) / 2;
++            y: (parent.height - self.height) / 2;
++            width: 340px;
++            height: tls-cert-layout.preferred-height;
++            tls-cert-layout := VerticalLayout {
++                padding: 20px;
++                spacing: 12px;
++                Text {
++                    text: UiStrings.tls-cert-title;
++                    color: WorkbenchStyle.text;
++                    font-size: 15px;
++                    font-weight: 600;
++                    wrap: word-wrap;
++                }
++                Text {
++                    text: root.tls-cert-message;
++                    color: WorkbenchStyle.muted;
++                    font-size: 13px;
++                    wrap: word-wrap;
++                }
++                HorizontalLayout {
++                    alignment: end;
++                    spacing: 10px;
++                    if !root.tls-cert-busy: WorkbenchButton {
++                        text: UiStrings.later;
++                        clicked => { root.dismiss-tls-certificate(); }
++                    }
++                    PrimaryButton {
++                        text: root.tls-cert-busy ? UiStrings.tls-cert-installing : UiStrings.tls-cert-install;
++                        enabled: !root.tls-cert-busy;
++                        clicked => { root.install-tls-certificate(); }
++                    }
++                }
++            }
++        }
++    }
++
+     // Connection feedback follows the workbench spacing and action hierarchy.
+     if root.connection-dialog-open || root.lan-open: Rectangle {
+         background: #15223850;
+diff --git a/apps/desktop/src/gui/ui/ui_localization.h b/apps/desktop/src/gui/ui/ui_localization.h
+index 5f565f91..0da4e475 100644
+--- a/apps/desktop/src/gui/ui/ui_localization.h
++++ b/apps/desktop/src/gui/ui/ui_localization.h
+@@ -169,6 +169,9 @@ inline int ApplyMainWindowStrings(
+   strings.set_signal_disconnected(
+       Text(localization::signal_disconnected[language]));
+   strings.set_tls_error(Text(localization::signal_tls_cert_error[language]));
++  strings.set_tls_cert_title(Text(localization::tls_cert_prompt_title[language]));
++  strings.set_tls_cert_install(Text(localization::tls_cert_prompt_install[language]));
++  strings.set_tls_cert_installing(Text(localization::tls_cert_prompt_installing[language]));
+   strings.set_signal_reconnect(
+       Text(localization::signal_reconnect[language]));
+   strings.set_signal_reconnecting(
+diff --git a/apps/desktop/xmake/targets.lua b/apps/desktop/xmake/targets.lua
+index 71278eec..3ebc8915 100644
+--- a/apps/desktop/xmake/targets.lua
++++ b/apps/desktop/xmake/targets.lua
+@@ -719,7 +719,7 @@ function setup_targets()
+                 "apps/desktop/src/platform/windows/service/local_host_channel.cpp")
+             add_syslinks("Wtsapi32")
+             add_links("opengl32")
+-            add_syslinks("Comctl32", "Iphlpapi", "Ws2_32", "Advapi32", {public = true})
++            add_syslinks("Comctl32", "Iphlpapi", "Ws2_32", "Advapi32", "Crypt32", {public = true})
+             add_files("apps/desktop/src/platform/windows/gui/tray/win_tray.cpp",
+                 "apps/desktop/src/platform/windows/gui/slint_backend.cpp",
+                 "apps/desktop/src/platform/windows/gui/window_icons.cpp",
+diff --git a/localization/catalog.json b/localization/catalog.json
+index 18ab31bf..16cca6c8 100644
+--- a/localization/catalog.json
++++ b/localization/catalog.json
+@@ -8028,6 +8028,90 @@
+       "es": "Certificado del servidor no válido o caducado. Reintentando automáticamente.",
+       "pt-BR": "Certificado do servidor inválido ou expirado. Tentando novamente automaticamente."
+     },
++    "服务器证书不受信任": {
++      "zh-Hans": "服务器证书不受信任",
++      "en": "Server certificate is not trusted",
++      "ru": "Сертификат сервера не является доверенным",
++      "zh-Hant": "伺服器憑證不受信任",
++      "ja": "サーバー証明書が信頼されていません",
++      "ko": "서버 인증서를 신뢰할 수 없습니다",
++      "de": "Serverzertifikat ist nicht vertrauenswürdig",
++      "fr": "Le certificat du serveur n'est pas approuvé",
++      "es": "El certificado del servidor no es de confianza",
++      "pt-BR": "O certificado do servidor não é confiável"
++    },
++    "无法验证服务器 {0} 的证书，因为它链到一张自签名的根证书。点击“自动安装证书”可把该根证书加入当前用户的受信任根证书库，不需要管理员权限。": {
++      "zh-Hans": "无法验证服务器 {0} 的证书，因为它链到一张自签名的根证书。点击“自动安装证书”可把该根证书加入当前用户的受信任根证书库，不需要管理员权限。",
++      "en": "The certificate presented by {0} cannot be verified because it chains to a self-signed root. Choose “Install certificate” to add that root to the current user's trusted root store. Administrator rights are not required.",
++      "ru": "Не удаётся проверить сертификат сервера {0}: цепочка ведёт к самоподписанному корню. Нажмите «Установить сертификат», чтобы добавить этот корень в хранилище доверенных корневых сертификатов текущего пользователя. Права администратора не нужны.",
++      "zh-Hant": "無法驗證伺服器 {0} 的憑證，因為它鏈結到一張自簽章的根憑證。點選「自動安裝憑證」可將該根憑證加入目前使用者的受信任根憑證存放區，不需要系統管理員權限。",
++      "ja": "サーバー {0} の証明書は自己署名ルートにつながるため検証できません。「証明書をインストール」を選ぶと、そのルートが現在のユーザーの信頼されたルート証明書ストアに追加されます。管理者権限は不要です。",
++      "ko": "서버 {0}의 인증서는 자체 서명된 루트로 연결되어 검증할 수 없습니다. “인증서 설치”를 선택하면 해당 루트가 현재 사용자의 신뢰할 수 있는 루트 저장소에 추가됩니다. 관리자 권한은 필요하지 않습니다.",
++      "de": "Das Zertifikat von {0} kann nicht überprüft werden, da es auf eine selbstsignierte Stammstelle zurückgeht. Mit „Zertifikat installieren“ wird diese Stammstelle in den Stammspeicher des aktuellen Benutzers aufgenommen. Administratorrechte sind nicht erforderlich.",
++      "fr": "Le certificat présenté par {0} ne peut pas être vérifié : il remonte à une racine auto-signée. Choisissez « Installer le certificat » pour ajouter cette racine au magasin de racines approuvées de l'utilisateur courant. Aucun droit administrateur n'est requis.",
++      "es": "No se puede verificar el certificado de {0} porque depende de una raíz autofirmada. Elige «Instalar certificado» para añadir esa raíz al almacén de entidades de confianza del usuario actual. No se requieren permisos de administrador.",
++      "pt-BR": "O certificado de {0} não pode ser verificado porque depende de uma raiz autoassinada. Escolha “Instalar certificado” para adicionar essa raiz ao repositório de raízes confiáveis do usuário atual. Não são necessários privilégios de administrador."
++    },
++    "自动安装证书": {
++      "zh-Hans": "自动安装证书",
++      "en": "Install certificate",
++      "ru": "Установить сертификат",
++      "zh-Hant": "自動安裝憑證",
++      "ja": "証明書をインストール",
++      "ko": "인증서 설치",
++      "de": "Zertifikat installieren",
++      "fr": "Installer le certificat",
++      "es": "Instalar certificado",
++      "pt-BR": "Instalar certificado"
++    },
++    "正在读取服务器证书并写入信任库…": {
++      "zh-Hans": "正在安装…",
++      "en": "Installing…",
++      "ru": "Установка…",
++      "zh-Hant": "正在安裝…",
++      "ja": "インストール中…",
++      "ko": "설치 중…",
++      "de": "Wird installiert…",
++      "fr": "Installation…",
++      "es": "Instalando…",
++      "pt-BR": "Instalando…"
++    },
++    "证书已安装，正在重新连接服务器…": {
++      "zh-Hans": "证书已安装，正在重新连接服务器…",
++      "en": "Certificate installed. Reconnecting to the server…",
++      "ru": "Сертификат установлен. Переподключение к серверу…",
++      "zh-Hant": "憑證已安裝，正在重新連線伺服器…",
++      "ja": "証明書をインストールしました。サーバーに再接続しています…",
++      "ko": "인증서가 설치되었습니다. 서버에 다시 연결하는 중…",
++      "de": "Zertifikat installiert. Verbindung zum Server wird wiederhergestellt…",
++      "fr": "Certificat installé. Reconnexion au serveur…",
++      "es": "Certificado instalado. Reconectando con el servidor…",
++      "pt-BR": "Certificado instalado. Reconectando ao servidor…"
++    },
++    "自动安装未成功（{0}）。证书已保存到 {1}，可双击该文件后选择“安装证书”，位置选“当前用户” → “受信任的根证书颁发机构”。": {
++      "zh-Hans": "自动安装未成功（{0}）。证书已保存到 {1}，可双击该文件后选择“安装证书”，位置选“当前用户” → “受信任的根证书颁发机构”。",
++      "en": "Automatic installation failed ({0}). The certificate was saved to {1}; double-click it and choose “Install Certificate”, then place it in “Current User” → “Trusted Root Certification Authorities”.",
++      "ru": "Автоматическая установка не удалась ({0}). Сертификат сохранён в {1}: откройте его двойным щелчком, выберите «Установить сертификат» и укажите «Текущий пользователь» → «Доверенные корневые центры сертификации».",
++      "zh-Hant": "自動安裝未成功（{0}）。憑證已儲存到 {1}，可雙擊該檔案後選擇「安裝憑證」，位置選「目前使用者」 → 「受信任的根憑證授權單位」。",
++      "ja": "自動インストールに失敗しました（{0}）。証明書は {1} に保存されています。ファイルをダブルクリックして「証明書のインストール」を選び、「現在のユーザー」→「信頼されたルート証明機関」に配置してください。",
++      "ko": "자동 설치에 실패했습니다({0}). 인증서가 {1}에 저장되었습니다. 파일을 두 번 클릭해 “인증서 설치”를 선택하고 “현재 사용자” → “신뢰할 수 있는 루트 인증 기관”에 배치하십시오.",
++      "de": "Die automatische Installation ist fehlgeschlagen ({0}). Das Zertifikat wurde unter {1} gespeichert. Doppelklicken Sie darauf, wählen Sie „Zertifikat installieren“ und legen Sie es unter „Aktueller Benutzer“ → „Vertrauenswürdige Stammzertifizierungsstellen“ ab.",
++      "fr": "L'installation automatique a échoué ({0}). Le certificat a été enregistré dans {1} ; double-cliquez dessus, choisissez « Installer le certificat », puis placez-le dans « Utilisateur actuel » → « Autorités de certification racines de confiance ».",
++      "es": "La instalación automática ha fallado ({0}). El certificado se ha guardado en {1}; haz doble clic en él, elige «Instalar certificado» y colócalo en «Usuario actual» → «Entidades de certificación raíz de confianza».",
++      "pt-BR": "A instalação automática falhou ({0}). O certificado foi salvo em {1}; clique duas vezes nele, escolha “Instalar certificado” e coloque-o em “Usuário atual” → “Autoridades de certificação raiz confiáveis”."
++    },
++    "服务器下发的证书链里没有自签名根证书。请先检查系统时间是否正确；若服务器使用受信任机构签发的证书，请联系服务器管理员。": {
++      "zh-Hans": "服务器下发的证书链里没有自签名根证书。请先检查系统时间是否正确；若服务器使用受信任机构签发的证书，请联系服务器管理员。",
++      "en": "The server did not present a self-signed root certificate. Check that the system clock is correct; if the server uses a certificate from a public authority, contact its administrator.",
++      "ru": "Сервер не предоставил самоподписанный корневой сертификат. Проверьте системное время; если сервер использует сертификат публичного центра, обратитесь к администратору.",
++      "zh-Hant": "伺服器下發的憑證鏈中沒有自簽章根憑證。請先檢查系統時間是否正確；若伺服器使用受信任機構簽發的憑證，請聯絡伺服器管理員。",
++      "ja": "サーバーから送られた証明書チェーンに自己署名ルート証明書が含まれていません。システム時刻が正しいか確認してください。公的機関の証明書を使っている場合はサーバー管理者に連絡してください。",
++      "ko": "서버가 제공한 인증서 체인에 자체 서명된 루트 인증서가 없습니다. 시스템 시간이 올바른지 확인하십시오. 공인 기관의 인증서를 사용하는 경우 서버 관리자에게 문의하십시오.",
++      "de": "Der Server hat kein selbstsigniertes Stammzertifikat übermittelt. Prüfen Sie die Systemzeit. Verwendet der Server ein Zertifikat einer öffentlichen Stelle, wenden Sie sich an dessen Administrator.",
++      "fr": "Le serveur n'a pas présenté de certificat racine auto-signé. Vérifiez l'horloge système ; si le serveur utilise un certificat délivré par une autorité publique, contactez son administrateur.",
++      "es": "El servidor no presentó un certificado raíz autofirmado. Comprueba que la hora del sistema sea correcta; si el servidor usa un certificado de una autoridad pública, contacta con su administrador.",
++      "pt-BR": "O servidor não apresentou um certificado raiz autoassinado. Verifique se o relógio do sistema está correto; se o servidor usar um certificado de uma autoridade pública, contate o administrador."
++    },
+     "该分组暂无近期连接": {
+       "zh-Hans": "该分组暂无近期连接",
+       "en": "No recent connections in this group",
+@@ -12049,6 +12133,13 @@
+     "signal_reconnect": "重新连接",
+     "signal_reconnecting": "正在重新连接...",
+     "signal_tls_cert_error": "服务器证书无效或已过期，正在自动重试",
++    "tls_cert_prompt_title": "服务器证书不受信任",
++    "tls_cert_prompt_body": "无法验证服务器 {0} 的证书，因为它链到一张自签名的根证书。点击“自动安装证书”可把该根证书加入当前用户的受信任根证书库，不需要管理员权限。",
++    "tls_cert_prompt_install": "自动安装证书",
++    "tls_cert_prompt_installing": "正在读取服务器证书并写入信任库…",
++    "tls_cert_prompt_installed": "证书已安装，正在重新连接服务器…",
++    "tls_cert_prompt_failed": "自动安装未成功（{0}）。证书已保存到 {1}，可双击该文件后选择“安装证书”，位置选“当前用户” → “受信任的根证书颁发机构”。",
++    "tls_cert_prompt_not_self_signed": "服务器下发的证书链里没有自签名根证书。请先检查系统时间是否正确；若服务器使用受信任机构签发的证书，请联系服务器管理员。",
+     "p2p_connected": "对等连接已建立",
+     "p2p_disconnected": "对等连接已断开",
+     "p2p_connecting": "正在建立对等连接...",
+@@ -12762,6 +12853,13 @@
+       "访问官网: ",
+       "访问密码必须为 6 位英文字母或数字，区分大小写。",
+       "服务器证书无效或已过期，正在自动重试",
++      "服务器证书不受信任",
++      "无法验证服务器 {0} 的证书，因为它链到一张自签名的根证书。点击“自动安装证书”可把该根证书加入当前用户的受信任根证书库，不需要管理员权限。",
++      "自动安装证书",
++      "正在读取服务器证书并写入信任库…",
++      "证书已安装，正在重新连接服务器…",
++      "自动安装未成功（{0}）。证书已保存到 {1}，可双击该文件后选择“安装证书”，位置选“当前用户” → “受信任的根证书颁发机构”。",
++      "服务器下发的证书链里没有自签名根证书。请先检查系统时间是否正确；若服务器使用受信任机构签发的证书，请联系服务器管理员。",
+       "该分组暂无近期连接",
+       "该应用需要授权以下权限:",
+       "该设备正在连接，请稍候",

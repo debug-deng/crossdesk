@@ -16,3 +16,14 @@ xcuserdata/
 
 # CLI npm dependencies
 node_modules/
+
+# 本地会话数据与构建记录
+.workbuddy/
+
+# 自托管部署的本地记录与证书（含服务器凭据，勿提交）
+deploy/selfhost/DEPLOYED.local.md
+deploy/selfhost/*.crt
+deploy/selfhost/*.key
+deploy/selfhost/compose.yaml
+deploy/selfhost/env.example
+deploy/selfhost/.env

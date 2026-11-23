@@ -98,6 +98,9 @@ export global UiStrings {
     in-out property <string> signal-connected: "Signal server connected";
     in-out property <string> signal-disconnected: "Signal server disconnected";
     in-out property <string> tls-error: "Server certificate invalid or expired. Retrying automatically.";
+    in-out property <string> tls-cert-title: "Server certificate is not trusted";
+    in-out property <string> tls-cert-install: "Install certificate";
+    in-out property <string> tls-cert-installing: "Installing…";
     in-out property <string> signal-reconnect: "Reconnect";
     in-out property <string> signal-reconnecting: "Reconnecting...";
     in-out property <string> update-available: "A new version is available";
@@ -147,6 +150,9 @@ export global UiStrings {
     in-out property <string> codec-h264: "H.264";
     in-out property <string> codec-av1: "AV1";
     in-out property <string> self-hosted-settings: "Self-hosted server settings";
+    in-out property <string> self-host-password-title: "Password required";
+    in-out property <string> self-host-password-hint: "Enter the administrator password to edit or toggle the self-hosted server.";
+    in-out property <string> self-host-password-wrong: "Incorrect password. Try again.";
     in-out property <string> access-website: "Website: ";
     in-out property <string> release-date-label: "Release Date: ";
 }
@@ -661,12 +667,53 @@ export component MainWindow inherits Window {
             focus-sink.focus();
         } else { root.connection-cancel(); }
     }
+    // The endpoint, its password, and the on/off switch are one unit: every
+    // change goes through the same password gate before it is committed.
+    function submit-host-password() {
+        if !root.verify-self-host-password(root.self-host-password-input) {
+            root.self-host-password-error = UiStrings.self-host-password-wrong;
+            root.self-host-password-input = "";
+            return;
+        }
+        root.self-host-password-open = false;
+        root.self-host-password-error = "";
+        root.self-host-password-input = "";
+        if root.self-host-password-action == "edit" {
+            root.self-host-password-action = "";
+            root.self-host-settings-open = true;
+        } else {
+            root.self-host-password-action = "";
+            // Equal values afterwards keep the change handler quiet.
+            root.self-hosted-enabled = root.self-hosted-draft;
+        }
+    }
+    function cancel-host-password() {
+        root.self-host-password-open = false;
+        root.self-host-password-error = "";
+        root.self-host-password-input = "";
+        if root.self-host-password-action == "toggle" {
+            root.self-host-password-action = "";
+            // Restore the committed switch; the draft matches it again, so the
+            // change handler stays idle instead of reopening the prompt.
+            root.self-hosted-draft = root.self-hosted-enabled;
+        } else {
+            root.self-host-password-action = "";
+        }
+    }
     in-out property <string> remote-id-input: "";
     in property <bool> password-visible: true;
     in property <bool> password-change-pending: false;
     in property <bool> signal-connected: false;
     in property <bool> signal-reconnecting: false;
     in property <bool> signal-tls-error: false;
+    // The untrusted-certificate prompt is driven from C++: it opens on the
+    // first handshake failure for an endpoint and carries the live status text
+    // while the certificate is being installed.
+    in-out property <bool> tls-cert-prompt-open: false;
+    in property <bool> tls-cert-busy: false;
+    in-out property <string> tls-cert-message: "";
+    callback install-tls-certificate;
+    callback dismiss-tls-certificate;
     in property <[RecentConnection]> recent-connections;
     out property <length> recent-preview-width: max(1px, (recent-scroll.width - 24px) / 3);
     out property <length> recent-preview-height: 80px;
@@ -757,6 +804,25 @@ export component MainWindow inherits Window {
     in property <string> settings-save-error;
     in-out property <bool> force-relay-enabled: false;
     in-out property <bool> self-hosted-enabled: false;
+    // The row edits a draft value; the committed value only moves once the
+    // administrator password for the endpoint has been accepted.
+    in-out property <bool> self-hosted-draft: false;
+    changed self-hosted-enabled => { root.self-hosted-draft = root.self-hosted-enabled; }
+    changed self-hosted-draft => {
+        // Only a user edit that diverges from the committed value opens the
+        // prompt; reverts and programmatic syncs land on equal values.
+        if !root.self-host-password-open && root.self-hosted-draft != root.self-hosted-enabled {
+            root.self-host-password-action = "toggle";
+            root.self-host-password-input = "";
+            root.self-host-password-error = "";
+            root.self-host-password-open = true;
+        }
+    }
+    in-out property <bool> self-host-password-open: false;
+    in-out property <string> self-host-password-input: "";
+    in-out property <string> self-host-password-error: "";
+    // "toggle" applies the draft, "edit" opens the endpoint editor.
+    in-out property <string> self-host-password-action: "";
     in-out property <bool> autostart-enabled: false;
     in property <bool> autostart-available: true;
     in property <bool> service-autostart-platform: false;
@@ -814,6 +880,8 @@ export component MainWindow inherits Window {
     callback refresh-autostart-status;
     callback save-self-hosted-settings() -> bool;
     callback cancel-self-hosted-settings;
+    // Fixed administrator password gate for the self-hosted endpoint.
+    callback verify-self-host-password(string) -> bool;
     callback browse-save-path;
     callback open-download;
     callback open-manual-download;
@@ -2730,6 +2798,52 @@ export component MainWindow inherits Window {
         }
     }
 
+    // Untrusted server certificate modal. A self-hosted signaling server ships a
+    // self-signed root, so verification fails on every retry until that root is
+    // trusted. Offer the one-click install instead of leaving the user in a
+    // retry loop.
+    if root.tls-cert-prompt-open: Rectangle {
+        background: #00000042;
+        z: 49;
+        TouchArea { clicked => { focus-sink.focus(); } }
+        DialogSurface {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 340px;
+            height: tls-cert-layout.preferred-height;
+            tls-cert-layout := VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+                Text {
+                    text: UiStrings.tls-cert-title;
+                    color: WorkbenchStyle.text;
+                    font-size: 15px;
+                    font-weight: 600;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: root.tls-cert-message;
+                    color: WorkbenchStyle.muted;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 10px;
+                    if !root.tls-cert-busy: WorkbenchButton {
+                        text: UiStrings.later;
+                        clicked => { root.dismiss-tls-certificate(); }
+                    }
+                    PrimaryButton {
+                        text: root.tls-cert-busy ? UiStrings.tls-cert-installing : UiStrings.tls-cert-install;
+                        enabled: !root.tls-cert-busy;
+                        clicked => { root.install-tls-certificate(); }
+                    }
+                }
+            }
+        }
+    }
+
     // Connection feedback follows the workbench spacing and action hierarchy.
     if root.connection-dialog-open || root.lan-open: Rectangle {
         background: #15223850;
@@ -3041,13 +3155,18 @@ export component MainWindow inherits Window {
                             SettingsToggleRow {
                                 label: UiStrings.self-hosted;
                                 label-reserve: self-host-edit.width + 84px;
-                                checked <=> root.self-hosted-enabled; enabled: !root.settings-session-active; divider: false;
+                                checked <=> root.self-hosted-draft; enabled: !root.settings-session-active; divider: false;
                                 self-host-edit := SettingsButton {
                                     x: parent.width - self.width - 60px; y: 4px;
                                     width: self-host-edit-metrics.preferred-width + 24px; height: 28px;
                                     text: GalleryStrings.texts[118];
                                     enabled: !root.settings-session-active;
-                                    clicked => { root.self-host-settings-open = true; }
+                                    clicked => {
+                                        root.self-host-password-action = "edit";
+                                        root.self-host-password-input = "";
+                                        root.self-host-password-error = "";
+                                        root.self-host-password-open = true;
+                                    }
                                     self-host-edit-metrics := Text {
                                         visible: false; accessible-role: none;
                                         text: parent.text; font-size: 12px;
@@ -3273,6 +3392,44 @@ export component MainWindow inherits Window {
             SurfaceSeparator { x: 18px; y: parent.height - 66px; width: parent.width - 36px; height: 1px; outline-color: UiSurface.separator; }
             SettingsButton { x: parent.width - 114px; y: parent.height - 50px; width: 92px; primary: true; text: UiStrings.ok; clicked => { if root.save-self-hosted-settings() { root.self-host-settings-open = false; } } }
             SettingsButton { x: parent.width - 124px - self.width; y: parent.height - 50px; width: max(80px, self.label-width); text: UiStrings.cancel; clicked => { root.cancel-self-hosted-settings(); root.self-host-settings-open = false; } }
+        }
+    }
+
+    // Sits above the settings and endpoint dialogs: both entry points funnel
+    // through this prompt before the endpoint is read or changed.
+    if root.self-host-password-open: Rectangle {
+        background: #15223840;
+        z: 60;
+        TouchArea { clicked => { focus-sink.focus(); } }
+        DialogSurface {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 360px; height: 226px;
+            border-radius: UiRadius.surface; outline-color: UiSurface.edge; background: #f8fafc;
+            TouchArea { clicked => { focus-sink.focus(); } }
+            Text {
+                x: 18px; y: 18px; width: parent.width - 36px; height: 24px;
+                text: UiStrings.self-host-password-title; font-size: 16px; font-weight: 600; color: #22324a;
+            }
+            Text {
+                x: 18px; y: 48px; width: parent.width - 36px; height: 34px;
+                text: UiStrings.self-host-password-hint; color: #34445a; font-size: 11px; wrap: word-wrap;
+            }
+            RoundedLineEdit {
+                x: 18px; y: 88px; width: parent.width - 36px; height: 30px;
+                surrounding-background: #f8fafc;
+                normal-outline-color: UiSurface.edge;
+                input-type: InputType.password;
+                text <=> root.self-host-password-input;
+                accepted => { root.submit-host-password(); }
+            }
+            if root.self-host-password-error != "": Text {
+                x: 18px; y: 124px; width: parent.width - 36px; height: 24px;
+                text: root.self-host-password-error; color: #c53e3e; font-size: 11px; wrap: word-wrap;
+            }
+            SurfaceSeparator { x: 18px; y: parent.height - 66px; width: parent.width - 36px; height: 1px; outline-color: UiSurface.separator; }
+            SettingsButton { x: parent.width - 114px; y: parent.height - 50px; width: 92px; primary: true; text: UiStrings.ok; clicked => { root.submit-host-password(); } }
+            SettingsButton { x: parent.width - 124px - self.width; y: parent.height - 50px; width: max(80px, self.label-width); text: UiStrings.cancel; clicked => { root.cancel-host-password(); } }
         }
     }
 

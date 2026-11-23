@@ -178,6 +178,11 @@ int ConfigCenter::Load() {
       persist_config_migration = true;
     }
   }
+  // The endpoint ships pre-configured: a configuration without a stored
+  // endpoint targets the bundled server, and builds upgraded from an older
+  // layout get the preset stamped in exactly once so a later opt-out is kept.
+  const bool self_hosted_preset_applied =
+      ini_->GetLongValue(section_, "self_hosted_preset_version", 0) >= 1;
   enable_self_hosted_ =
       ini_->GetBoolValue(section_, "enable_self_hosted", enable_self_hosted_);
 
@@ -187,16 +192,28 @@ int ConfigCenter::Load() {
       strlen(signal_server_host_value) > 0) {
     signal_server_host_ = signal_server_host_value;
   } else {
-    signal_server_host_ = "";
+    signal_server_host_ = kSelfHostedPresetHost;
   }
   const char* signal_server_port_value =
       ini_->GetValue(section_, "signal_server_port", nullptr);
   if (signal_server_port_value != nullptr &&
       strlen(signal_server_port_value) > 0) {
-    signal_server_port_ =
-        static_cast<int>(ini_->GetLongValue(section_, "signal_server_port", 0));
+    const long stored_port = ini_->GetLongValue(section_, "signal_server_port", 0);
+    signal_server_port_ = stored_port >= 1 && stored_port <= 65535
+                              ? static_cast<int>(stored_port)
+                              : kSelfHostedPresetPort;
   } else {
-    signal_server_port_ = 0;
+    signal_server_port_ = kSelfHostedPresetPort;
+  }
+  if (!self_hosted_preset_applied) {
+    enable_self_hosted_ = true;
+    signal_server_host_ = kSelfHostedPresetHost;
+    signal_server_port_ = kSelfHostedPresetPort;
+    ini_->SetBoolValue(section_, "enable_self_hosted", true);
+    ini_->SetValue(section_, "signal_server_host", kSelfHostedPresetHost);
+    ini_->SetLongValue(section_, "signal_server_port", kSelfHostedPresetPort);
+    ini_->SetLongValue(section_, "self_hosted_preset_version", 1);
+    persist_config_migration = true;
   }
   enable_autostart_ =
       ini_->GetBoolValue(section_, "enable_autostart", enable_autostart_);
@@ -388,9 +405,19 @@ int ConfigCenter::ApplySharedHostConfig(const std::string& contents) {
   host.SetUnicode(true);
   if (host.LoadData(contents.c_str(), contents.size()) < 0 ||
       host.GetLongValue(section_, "shared_identity_config_version", 0) != 1) return -1;
-  const bool self_hosted = host.GetBoolValue(section_, "enable_self_hosted", false);
-  const std::string server = host.GetValue(section_, "signal_server_host", "");
-  const long port = host.GetLongValue(section_, "signal_server_port", 0);
+  bool self_hosted = host.GetBoolValue(section_, "enable_self_hosted", false);
+  std::string server = host.GetValue(section_, "signal_server_host", "");
+  long port = host.GetLongValue(section_, "signal_server_port", 0);
+  MiniRtcSignalServerAddress address{};
+  // A host profile written before the preset existed carries no endpoint. Use
+  // the baked-in one instead of rejecting or blanking the shipped settings.
+  if (server.empty() || port < 1 || port > 65535 ||
+      MiniRtcParseSignalServerAddress(server.data(), server.size(), &address) != 0) {
+    if (host.GetValue(section_, "signal_server_host", nullptr) == nullptr)
+      self_hosted = true;
+    server = kSelfHostedPresetHost;
+    port = kSelfHostedPresetPort;
+  }
   const long turn = host.GetLongValue(section_, "turn_mode", static_cast<long>(turn_mode_));
   const long codec = host.GetLongValue(section_, "video_encode_format", static_cast<long>(video_encode_format_));
   const int direct_bps = ReadStartingBitrate(
@@ -402,10 +429,7 @@ int ConfigCenter::ApplySharedHostConfig(const std::string& contents) {
       kDefaultDisableReceiverPaddingProbing);
   const bool trusted = host.GetBoolValue(section_, "trusted_devices_only", false);
   const bool lock = host.GetBoolValue(section_, "lock_on_disconnect", true);
-  MiniRtcSignalServerAddress address{};
-  if (!IsValidTurnModeValue(turn) || codec < 0 || codec > 1 ||
-      (self_hosted && (port < 1 || port > 65535 ||
-       MiniRtcParseSignalServerAddress(server.data(), server.size(), &address) != 0))) return -1;
+  if (!IsValidTurnModeValue(turn) || codec < 0 || codec > 1) return -1;
   if (StoreValues({{"enable_self_hosted", self_hosted ? "true" : "false"},
                    {"signal_server_host", server}, {"signal_server_port", std::to_string(port)},
                    {"turn_mode", std::to_string(turn)}, {"video_encode_format", std::to_string(codec)},
