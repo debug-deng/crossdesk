@@ -32,3 +32,4 @@ deploy/selfhost/.env
 build-cfg.log
 ci-status.log
 ci-watch.out
+ci-build.log
