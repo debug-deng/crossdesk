@@ -1,0 +1,103 @@
+name: Windows build (portable)
+
+# Windows-only build used to produce a testable portable package without
+# waiting for the full multi-platform release pipeline.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Desktop version stamped into the binaries, e.g. 1.7.7"
+        required: false
+        default: "1.7.7"
+      use_cuda:
+        description: "Compile with CUDA/NVENC support"
+        required: false
+        type: boolean
+        default: true
+  push:
+    branches:
+      - "build/win-*"
+
+permissions:
+  contents: read
+
+env:
+  XMAKE_MIN_VERSION: "3.1.1"
+  CROSSDESK_UPDATE_PUBLIC_KEY: ${{ vars.CROSSDESK_UPDATE_PUBLIC_KEY }}
+
+jobs:
+  build-windows:
+    name: Build Windows x64
+    runs-on: windows-2022
+    env:
+      XMAKE_GLOBALDIR: D:\xmake_global
+      VERSION_NUM: ${{ inputs.version || '1.7.7' }}
+      USE_CUDA: ${{ github.event_name == 'workflow_dispatch' && inputs.use_cuda || true }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Initialize submodules
+        run: git submodule update --init --recursive
+
+      - name: Ensure minimum Xmake version
+        uses: ./.github/actions/ensure-xmake
+        with:
+          minimum-version: ${{ env.XMAKE_MIN_VERSION }}
+
+      - name: Cache xmake dependencies
+        uses: actions/cache@v5
+        with:
+          path: D:\xmake_global\.xmake\packages
+          key: "${{ runner.os }}-xmake-deps-intel-${{ github.run_id }}"
+          restore-keys: |
+            ${{ runner.os }}-xmake-deps-intel-
+
+      - name: Build CrossDesk
+        run: |
+          xmake f --CROSSDESK_VERSION=${{ env.VERSION_NUM }} --USE_CUDA=${{ env.USE_CUDA }} -y
+          xmake b -vy crossdesk
+
+      - name: Package Portable
+        shell: pwsh
+        run: |
+          $buildDir = "${{ github.workspace }}\build\windows\x64\release"
+          $portableDir = "${{ github.workspace }}\portable"
+          New-Item -ItemType Directory -Force -Path $portableDir
+
+          $portableFiles = @(
+            @("crossdesk.exe", "CrossDesk.exe"),
+            @("crossdesk_service.exe", "crossdesk_service.exe"),
+            @("crossdesk_session_helper.exe", "crossdesk_session_helper.exe"),
+            @("crossdesk_privacy_cursor_helper.exe", "crossdesk_privacy_cursor_helper.exe"),
+            @("crossdesk_privacy_window.dll", "crossdesk_privacy_window.dll"),
+            @("slint_cpp.dll", "slint_cpp.dll")
+          )
+
+          foreach ($file in $portableFiles) {
+            $source = Join-Path $buildDir $file[0]
+            $destination = Join-Path $portableDir $file[1]
+            if (!(Test-Path $source)) {
+              throw "Missing portable package file: $source"
+            }
+            Copy-Item $source $destination -Force
+          }
+
+          Copy-Item (Join-Path $buildDir "*.dll") $portableDir -Force
+
+          $driverDir = Join-Path $buildDir "usbmmidd_v2"
+          if (Test-Path (Join-Path $driverDir "deviceinstaller64.exe")) {
+            Copy-Item $driverDir (Join-Path $portableDir "usbmmidd_v2") -Recurse -Force
+          } else {
+            Write-Host "usbmmidd_v2 driver package not present, skipping."
+          }
+
+          Compress-Archive -Path "$portableDir\*" -DestinationPath "${{ github.workspace }}\crossdesk-win-x64-portable-${{ env.VERSION_NUM }}.zip"
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: crossdesk-win-x64-portable-${{ env.VERSION_NUM }}
+          path: ${{ github.workspace }}/crossdesk-win-x64-portable-${{ env.VERSION_NUM }}.zip
+          if-no-files-found: error
