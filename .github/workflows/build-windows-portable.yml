@@ -11,10 +11,10 @@ on:
         required: false
         default: "1.7.7"
       use_cuda:
-        description: "Compile with CUDA/NVENC support"
+        description: "Compile with CUDA/NVENC support (needs the CUDA toolkit step; keep off for quick builds)"
         required: false
         type: boolean
-        default: true
+        default: false
   push:
     branches:
       - "build/win-*"
@@ -33,7 +33,7 @@ jobs:
     env:
       XMAKE_GLOBALDIR: D:\xmake_global
       VERSION_NUM: ${{ inputs.version || '1.7.7' }}
-      USE_CUDA: ${{ github.event_name == 'workflow_dispatch' && inputs.use_cuda || true }}
+      USE_CUDA: ${{ inputs.use_cuda || 'false' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
