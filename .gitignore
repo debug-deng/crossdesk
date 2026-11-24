@@ -27,3 +27,8 @@ deploy/selfhost/*.key
 deploy/selfhost/compose.yaml
 deploy/selfhost/env.example
 deploy/selfhost/.env
+
+# 本地构建/CI 观察产物
+build-cfg.log
+ci-status.log
+ci-watch.out

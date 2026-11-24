@@ -19,65 +19,30 @@ nasm），因此改用项目自带的 CI 工作流出包。CI 环境是官方验
 3. 点「稍后」：本次运行不再提示（换服务器会重新提示）。
 4. 安装失败时对话框显示原因，并给出导出的证书路径，可双击手动安装。
 
-## 方案 A：你提供 GitHub token，我全自动完成
+## 构建仓库与工作流
 
-给我一个 **classic PAT**（scope 勾 `repo` + `workflow`），我会用它：
+- 仓库：`https://github.com/debug-deng/crossdesk`（fork 自 `kunkundi/crossdesk`，本地 remote
+  `origin` 指它，`upstream` 指原仓库）。
+- 专用工作流：`.github/workflows/build-windows-portable.yml`，只跑 Windows x64 并产出
+  便携版 zip，比 `build.yml` 的全平台流水线快得多，也不会占 iOS/Android 的额度。
+  触发方式：`workflow_dispatch`（可填 version / use_cuda），或 push 到 `build/win-*` 分支。
 
-```bash
-gh auth login --with-token
-gh repo fork kunkundi/crossdesk --clone=false
-# 本地打补丁 → push 到 fork 的 feature 分支 → 等 Actions → 下载 artifact
-```
+> fork 的坑：新建的 fork 里已有工作流是 `disabled_fork` 状态，Actions 一条都不会注册
+> （API 查 `workflows` 返回 0）。**推一个新增的工作流文件**之后 GitHub 才会把它们注册起来，
+> 之后 `workflow_dispatch` 就能用了。
 
-产物会放到 `K:\crossdesk\deploy\selfhost\dist\`。
-
-## 方案 B：自己动手（约 10 分钟 + 40~60 分钟等构建）
-
-前提：有自己的 GitHub 账号，装了 Git。
-
-### 1. fork 并克隆
-
-打开 https://github.com/kunkundi/crossdesk → 右上角 Fork。然后：
+### 手动重新出包
 
 ```bash
-git clone --recurse-submodules https://github.com/<你的用户名>/crossdesk.git
-cd crossdesk
+# 在仓库根目录，本地分支已包含改动
+git checkout build/win-selfhost
+git push -u origin build/win-selfhost     # 走代理：git -c http.proxy=http://127.0.0.1:7890 push
+# 或在网页 Actions → Windows build (portable) → Run workflow
 ```
 
-### 2. 打补丁
-
-把本目录的 `tls-cert-prompt.patch` 放到仓库根目录，然后：
-
-```bash
-git apply --stat tls-cert-prompt.patch   # 先看改了什么
-git apply -3 tls-cert-prompt.patch
-```
-
-如果上游代码有更新导致冲突，`git apply -3` 会做三方合并；仍冲突就告诉我，我按新的基线重做补丁。
-
-### 3. push 触发构建
-
-```bash
-git checkout -b feature/tls-cert-prompt
-git add -A
-git commit -m "prompt and auto-install the server root certificate on TLS failure"
-git push -u origin feature/tls-cert-prompt
-```
-
-工作流 `.github/workflows/build.yml` 的触发条件是 `push: branches: "**"`，推送后会自动跑
-Linux / macOS / iOS / Android / Windows 全部任务。**只需要等 Windows 那个**：
-`Build on Windows x64`，约 40~60 分钟（首次没有依赖缓存，slint/Rust 编译最慢）。
-
-### 4. 下载产物
-
-Actions → 左侧选这次运行 → 页面底部 **Artifacts**：
-
-| 产物 | 用途 |
-|---|---|
-| `crossdesk-win-x64-1.7.6` | NSIS 安装包（未签名，SmartScreen 会拦一次，选「仍要运行」） |
-| `crossdesk-win-x64-portable-1.7.6` | 便携版 zip，解压即用，适合测试 |
-
-建议先用便携版验证：解压 → 运行 `CrossDesk.exe` → 设置里填自托管地址 → 应该弹证书对话框。
+产物：Actions → 目标 run → 页面底部 **Artifacts** → `crossdesk-win-x64-portable-<ver>.zip`。
+解压即用，适合测试。若也要 NSIS 安装包，跑 `build.yml` 的 `Build on Windows x64`
+（产物 `crossdesk-win-x64-<ver>`，未签名，SmartScreen 会拦一次）。
 
 ## 验证清单
 
