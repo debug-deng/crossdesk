@@ -1,4 +1,4 @@
-name: Windows build (portable)
+name: Windows build (installer + portable)
 
 # Windows-only build used to produce a testable portable package without
 # waiting for the full multi-platform release pipeline.
@@ -57,7 +57,34 @@ jobs:
       - name: Build CrossDesk
         run: |
           xmake f --CROSSDESK_VERSION=${{ env.VERSION_NUM }} --USE_CUDA=${{ env.USE_CUDA }} -y
-          xmake b -vy crossdesk
+          xmake b -vy crossdesk crossdesk_updater
+
+      - name: Install NSIS plugins
+        shell: pwsh
+        run: |
+          $pluginDir = "C:\Program Files (x86)\NSIS\Plugins\x86-unicode"
+          if (!(Test-Path $pluginDir)) {
+            throw "NSIS plugin directory not found: $pluginDir"
+          }
+
+          $url = "https://github.com/DigitalMediaServer/NSIS-INetC-plugin/releases/download/v1.0.5.7/InetC.zip"
+          $out = "$env:RUNNER_TEMP\InetC.zip"
+          Invoke-WebRequest -Uri $url -OutFile $out
+          Expand-Archive $out -DestinationPath "$env:RUNNER_TEMP\InetC" -Force
+          Copy-Item "$env:RUNNER_TEMP\InetC\x86-unicode\INetC.dll" $pluginDir -Force
+          Copy-Item "${{ github.workspace }}\apps\desktop\scripts\windows\nsProcess.dll" $pluginDir -Force
+
+      - name: Package installer
+        shell: pwsh
+        run: |
+          & "${{ github.workspace }}\apps\desktop\scripts\windows\pkg_x64.ps1" $env:VERSION_NUM
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: crossdesk-win-x64-${{ env.VERSION_NUM }}
+          path: ${{ github.workspace }}/apps/desktop/scripts/windows/crossdesk-win-x64-${{ env.VERSION_NUM }}.exe
+          if-no-files-found: error
 
       - name: Package Portable
         shell: pwsh
